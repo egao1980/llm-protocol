@@ -3,6 +3,7 @@
 (defun %hint-name (prefs)
   (cond
     ((null prefs) nil)
+    ((stringp prefs) prefs)
     ((typep prefs 'mcp-protocol:mcp-model-preferences)
      (%hint-name (mcp-protocol::mcp-model-preferences-hints prefs)))
     ((hash-table-p prefs)
@@ -16,7 +17,6 @@
          ((typep first 'mcp-protocol:mcp-model-preferences)
           (%hint-name first))
          (t nil))))
-    ((stringp prefs) prefs)
     (t nil)))
 
 (defun %sampling-model (params)
@@ -32,59 +32,64 @@
       (funcall accessor params)
       (mcp-protocol:param params json-key)))
 
-(defun %mcp-message->llm (msg)
+(defun %mcp-message->turn (msg)
   (cond
     ((typep msg 'mcp-protocol:mcp-sampling-message)
-     (make-llm-message
-      :role (or (mcp-protocol::mcp-sampling-message-role msg) "user")
-      :content (llm-protocol::%content-text
-                (mcp-protocol::mcp-sampling-message-content msg))))
-    (t (coerce-message msg))))
+     (make-llm-turn
+      :role (llm-protocol::%role
+             (or (mcp-protocol::mcp-sampling-message-role msg) :user))
+      :parts (list (make-llm-text-part
+                    :text (llm-protocol::%content-text
+                           (mcp-protocol::mcp-sampling-message-content msg))))))
+    (t (coerce-turn msg))))
 
-(defun %sampling-messages (params)
+(defun %sampling-turns (params)
   (let* ((raw (if (typep params 'mcp-protocol:mcp-sampling-request)
                   (mcp-protocol::mcp-sampling-request-messages params)
                   (mcp-protocol:param params "messages")))
-         (msgs (mapcar #'%mcp-message->llm (llm-protocol::%as-list raw)))
+         (turns (mapcar #'%mcp-message->turn (llm-protocol::%as-list raw)))
          (sys (if (typep params 'mcp-protocol:mcp-sampling-request)
                   (mcp-protocol::mcp-sampling-request-system-prompt params)
                   (or (mcp-protocol:param params "systemPrompt")
                       (mcp-protocol:param params "system")))))
     (if (and sys (plusp (length (string sys))))
-        (cons (make-llm-message :role "system" :content sys) msgs)
-        msgs)))
+        (cons (system-turn sys) turns)
+        turns)))
+
+(defun %sampling-settings (params)
+  (make-llm-settings
+   :temperature (%sampling-slot params "temperature"
+                                #'mcp-protocol::mcp-sampling-request-temperature)
+   :max-tokens (%sampling-slot params "maxTokens"
+                               #'mcp-protocol::mcp-sampling-request-max-tokens)
+   :stop (%sampling-slot params "stopSequences"
+                         #'mcp-protocol::mcp-sampling-request-stop-sequences)))
 
 (defun %stop-reason (finish)
-  (cond
-    ((null finish) "endTurn")
-    ((string-equal finish "stop") "endTurn")
-    ((string-equal finish "length") "maxTokens")
-    ((string-equal finish "tool_calls") "endTurn")
-    (t (string finish))))
+  (case finish
+    ((:stop nil) "endTurn")
+    (:length "maxTokens")
+    (:tool-use "endTurn")
+    (t (if (stringp finish) finish "endTurn"))))
 
-(defun llm-result->mcp-create-message (result)
-  "Map GENERATE's LLM-RESULT to a sampling/createMessage result object."
+(defun llm-response->mcp-create-message (response)
+  "Map GENERATE's LLM-RESPONSE to a sampling/createMessage result object."
   (mcp-protocol:json-object
    "role" "assistant"
-   "model" (or (llm-result-model result) :omit)
-   "content" (mcp-protocol:make-text-content (or (llm-result-text result) ""))
-   "stopReason" (%stop-reason (llm-result-finish-reason result))))
+   "model" (or (llm-response-model response) :omit)
+   "content" (mcp-protocol:make-text-content (or (llm-response-text response) ""))
+   "stopReason" (%stop-reason (llm-response-finish-reason response))))
 
 (defun make-mcp-sampling-handler (&key (backend *llm-backend*))
   "Return a function suitable as MCP-CLIENT-SAMPLING-HANDLER.
 PARAMS may be a hash-table (JSON-RPC) or MCP-SAMPLING-REQUEST. Does not invent
 a second create-message — the host still uses MCP-PROTOCOL:CREATE-MESSAGE."
   (lambda (params)
-    (llm-result->mcp-create-message
+    (llm-response->mcp-create-message
      (generate (or backend *llm-backend*)
-               (%sampling-messages params)
+               (%sampling-turns params)
                :model (%sampling-model params)
-               :temperature (%sampling-slot params "temperature"
-                                            #'mcp-protocol::mcp-sampling-request-temperature)
-               :max-tokens (%sampling-slot params "maxTokens"
-                                           #'mcp-protocol::mcp-sampling-request-max-tokens)
-               :stop (%sampling-slot params "stopSequences"
-                                     #'mcp-protocol::mcp-sampling-request-stop-sequences)
+               :settings (%sampling-settings params)
                :tools (%sampling-slot params "tools"
                                       #'mcp-protocol::mcp-sampling-request-tools)
                :tool-choice (%sampling-slot params "toolChoice"

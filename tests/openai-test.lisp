@@ -14,10 +14,14 @@
      (let* ((body (stack-json:decode content))
             (msgs (gethash "messages" body))
             (last (elt msgs (1- (length msgs))))
-            (tools (gethash "tools" body)))
+            (tools (gethash "tools" body))
+            (temp (gethash "temperature" body)))
+       (declare (ignore temp))
        (values 200
                (stack-json:encode
                 (%ht "model" (or (gethash "model" body) "gpt-4o-mini")
+                     "usage" (%ht "prompt_tokens" 3 "completion_tokens" 2
+                                  "total_tokens" 5)
                      "choices"
                      (vector (%ht "finish_reason" (if tools "tool_calls" "stop")
                                   "message"
@@ -49,26 +53,39 @@
                    :api-key "sk-test"
                    :request-fn #'%fake-openai))
          (r (llm-protocol:generate backend "hi" :model "local")))
-    (ok (equal "ok:hi" (llm-protocol:llm-result-text r)))
-    (ok (equal "local" (llm-protocol:llm-result-model r)))
-    (ok (equal "stop" (llm-protocol:llm-result-finish-reason r)))))
+    (ok (equal "ok:hi" (llm-protocol:llm-response-text r)))
+    (ok (equal "local" (llm-protocol:llm-response-model r)))
+    (ok (eq :stop (llm-protocol:llm-response-finish-reason r)))
+    (ok (= 5 (llm-protocol:llm-usage-total-tokens (llm-protocol:llm-response-usage r))))))
+
+(deftest openai-settings-on-wire
+  (let ((seen nil))
+    (flet ((capture (method url &key headers content)
+             (declare (ignore method url headers))
+             (setf seen (stack-json:decode content))
+             (%fake-openai :post "http://x/chat/completions" :content content)))
+      (llm-protocol:generate
+       (llm-backend-openai:make-openai-compat-backend :request-fn #'capture)
+       "hi"
+       :settings '(:temperature 0 :max-tokens 16))
+      (ok (zerop (gethash "temperature" seen)))
+      (ok (= 16 (gethash "max_tokens" seen))))))
 
 (deftest openai-tools-mock-http
   (let* ((backend (llm-backend-openai:make-openai-compat-backend
                    :request-fn #'%fake-openai))
          (r (llm-protocol:generate backend "add"
                                    :tools (list (llm-protocol:make-llm-tool :name "sum")))))
-    (ok (equal "tool_calls" (llm-protocol:llm-result-finish-reason r)))
-    (ok (equal "sum" (llm-protocol:llm-tool-call-name
-                      (first (llm-protocol:llm-message-tool-calls
-                              (llm-protocol:llm-result-message r))))))))
+    (ok (eq :tool-use (llm-protocol:llm-response-finish-reason r)))
+    (ok (equal "sum" (llm-protocol:llm-tool-call-part-name
+                      (first (llm-protocol:llm-response-tool-calls r)))))))
 
 (deftest openai-list-models-mock-http
   (let ((models (llm-protocol:list-models
                  (llm-backend-openai:make-openai-compat-backend
                   :request-fn #'%fake-openai))))
-    (ok (equal "local" (llm-protocol:llm-model-id (first models))))
-    (ok (equal "lmstudio" (llm-protocol:llm-model-owned-by (first models))))))
+    (ok (equal "local" (llm-protocol:llm-model-info-id (first models))))
+    (ok (equal "lmstudio" (llm-protocol:llm-model-info-owned-by (first models))))))
 
 (deftest openai-http-error
   (ok (signals (llm-protocol:generate
@@ -78,17 +95,18 @@
                'llm-protocol:llm-http-error)))
 
 (deftest openai-stream-unsupported
-  (ok (signals (llm-protocol:generate
+  (ok (signals (llm-protocol:stream-generate
                 (llm-backend-openai:make-openai-compat-backend :request-fn #'%fake-openai)
-                "hi" :stream t)
+                "hi")
                'llm-protocol:llm-unsupported)))
 
 (deftest openai-live-optional
   (if (and (uiop:getenv "LLM_OPENAI_LIVE")
            (plusp (length (uiop:getenv "LLM_OPENAI_LIVE"))))
       (let* ((backend (llm-backend-openai:make-openai-compat-backend))
-             (r (llm-protocol:generate backend "Reply with the single word pong."
-                                       :temperature 0 :max-tokens 16)))
-        (ok (llm-protocol:llm-result-p r))
-        (ok (plusp (length (or (llm-protocol:llm-result-text r) "")))))
+             (r (llm-protocol:generate
+                 backend "Reply with the single word pong."
+                 :settings '(:temperature 0 :max-tokens 16))))
+        (ok (llm-protocol:llm-response-p r))
+        (ok (plusp (length (or (llm-protocol:llm-response-text r) "")))))
       (skip "set LLM_OPENAI_LIVE=1 for a live OpenAI-compat call")))

@@ -1,6 +1,6 @@
 (defsystem "llm-protocol"
   :version "0.1.0"
-  :description "CLOS LLM generate protocol for cl-stack (adapter; not blackboard core)"
+  :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
   :depends-on ()

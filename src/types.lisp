@@ -1,33 +1,122 @@
 (in-package #:llm-protocol)
 
-(defclass llm-message ()
-  ((role :initarg :role :accessor llm-message-role :initform "user")
-   (content :initarg :content :accessor llm-message-content :initform "")
-   (name :initarg :name :accessor llm-message-name :initform nil)
-   (tool-call-id :initarg :tool-call-id :accessor llm-message-tool-call-id
-                 :initform nil)
-   (tool-calls :initarg :tool-calls :accessor llm-message-tool-calls
-               :initform nil)))
+;;; Role lives on the turn; type lives on the part.
+;;; That is the Anthropic / Gemini / OpenAI Responses / Vercel ModelMessage
+;;; majority — not a chat-completions "one message, glued concerns" blob.
 
-(defun make-llm-message (&key (role "user") (content "") name tool-call-id tool-calls)
-  (make-instance 'llm-message
-                 :role role :content content :name name
-                 :tool-call-id tool-call-id :tool-calls tool-calls))
+(deftype llm-role ()
+  '(member :system :user :assistant :tool))
 
-(defun llm-message-p (x)
-  (typep x 'llm-message))
+(deftype llm-finish-reason ()
+  '(member :stop :length :tool-use :content-filter))
 
-(defclass llm-tool-call ()
-  ((id :initarg :id :accessor llm-tool-call-id :initform nil)
-   (name :initarg :name :accessor llm-tool-call-name)
-   (arguments :initarg :arguments :accessor llm-tool-call-arguments
+(defclass llm-part () ()
+  (:documentation "One content block. Subclass, do not hang extra meaning on TEXT."))
+
+(defun llm-part-p (x)
+  (typep x 'llm-part))
+
+(defclass llm-text-part (llm-part)
+  ((text :initarg :text :accessor llm-text-part-text :initform "")))
+
+(defun make-llm-text-part (&key (text ""))
+  (make-instance 'llm-text-part :text (if text (string text) "")))
+
+(defun llm-text-part-p (x)
+  (typep x 'llm-text-part))
+
+(defclass llm-image-part (llm-part)
+  ((url :initarg :url :accessor llm-image-part-url :initform nil)
+   (media-type :initarg :media-type :accessor llm-image-part-media-type :initform nil)
+   (data :initarg :data :accessor llm-image-part-data :initform nil)))
+
+(defun make-llm-image-part (&key url media-type data)
+  (make-instance 'llm-image-part :url url :media-type media-type :data data))
+
+(defun llm-image-part-p (x)
+  (typep x 'llm-image-part))
+
+(defclass llm-tool-call-part (llm-part)
+  ((id :initarg :id :accessor llm-tool-call-part-id :initform nil)
+   (name :initarg :name :accessor llm-tool-call-part-name)
+   (arguments :initarg :arguments :accessor llm-tool-call-part-arguments
               :initform "{}")))
 
-(defun make-llm-tool-call (&key id name (arguments "{}"))
-  (make-instance 'llm-tool-call :id id :name name :arguments arguments))
+(defun make-llm-tool-call-part (&key id name (arguments "{}"))
+  (make-instance 'llm-tool-call-part :id id :name name :arguments arguments))
 
-(defun llm-tool-call-p (x)
-  (typep x 'llm-tool-call))
+(defun llm-tool-call-part-p (x)
+  (typep x 'llm-tool-call-part))
+
+(defclass llm-tool-result-part (llm-part)
+  ((id :initarg :id :accessor llm-tool-result-part-id)
+   (name :initarg :name :accessor llm-tool-result-part-name :initform nil)
+   (content :initarg :content :accessor llm-tool-result-part-content :initform "")
+   (error-p :initarg :error-p :accessor llm-tool-result-part-error-p :initform nil)))
+
+(defun make-llm-tool-result-part (&key id name (content "") error-p)
+  (make-instance 'llm-tool-result-part :id id :name name :content content :error-p error-p))
+
+(defun llm-tool-result-part-p (x)
+  (typep x 'llm-tool-result-part))
+
+(defclass llm-thinking-part (llm-part)
+  ((text :initarg :text :accessor llm-thinking-part-text :initform "")
+   (signature :initarg :signature :accessor llm-thinking-part-signature :initform nil)))
+
+(defun make-llm-thinking-part (&key (text "") signature)
+  (make-instance 'llm-thinking-part :text text :signature signature))
+
+(defun llm-thinking-part-p (x)
+  (typep x 'llm-thinking-part))
+
+(defclass llm-turn ()
+  ((role :initarg :role :accessor llm-turn-role :initform :user)
+   (parts :initarg :parts :accessor llm-turn-parts :initform nil)))
+
+(defun make-llm-turn (&key (role :user) parts)
+  (make-instance 'llm-turn :role role :parts (copy-list parts)))
+
+(defun llm-turn-p (x)
+  (typep x 'llm-turn))
+
+(defun user-turn (text &rest more-parts)
+  (make-llm-turn :role :user :parts (list* (make-llm-text-part :text text) more-parts)))
+
+(defun system-turn (text)
+  (make-llm-turn :role :system :parts (list (make-llm-text-part :text text))))
+
+(defun assistant-turn (text &key tool-calls thinking)
+  (make-llm-turn
+   :role :assistant
+   :parts (append (and thinking (list (if (llm-thinking-part-p thinking)
+                                          thinking
+                                          (make-llm-thinking-part :text thinking))))
+                  (and text (plusp (length text))
+                       (list (make-llm-text-part :text text)))
+                  (copy-list tool-calls))))
+
+(defun tool-turn (id content &key name error-p)
+  (make-llm-turn :role :tool
+                 :parts (list (make-llm-tool-result-part :id id :name name
+                                                         :content content :error-p error-p))))
+
+(defclass llm-settings ()
+  ((temperature :initarg :temperature :accessor llm-settings-temperature :initform nil)
+   (max-tokens :initarg :max-tokens :accessor llm-settings-max-tokens :initform nil)
+   (stop :initarg :stop :accessor llm-settings-stop :initform nil)
+   (top-p :initarg :top-p :accessor llm-settings-top-p :initform nil)
+   (response-format :initarg :response-format :accessor llm-settings-response-format
+                    :initform nil)
+   (extra :initarg :extra :accessor llm-settings-extra :initform nil)))
+
+(defun make-llm-settings (&key temperature max-tokens stop top-p response-format extra)
+  (make-instance 'llm-settings
+                 :temperature temperature :max-tokens max-tokens :stop stop
+                 :top-p top-p :response-format response-format :extra extra))
+
+(defun llm-settings-p (x)
+  (typep x 'llm-settings))
 
 (defclass llm-tool ()
   ((name :initarg :name :accessor llm-tool-name)
@@ -35,37 +124,44 @@
    (parameters :initarg :parameters :accessor llm-tool-parameters :initform nil)))
 
 (defun make-llm-tool (&key name description parameters)
-  (make-instance 'llm-tool :name name :description description
-                 :parameters parameters))
+  (check-type name string)
+  (make-instance 'llm-tool :name name :description description :parameters parameters))
 
 (defun llm-tool-p (x)
   (typep x 'llm-tool))
 
-(defclass llm-model ()
-  ((id :initarg :id :accessor llm-model-id)
-   (owned-by :initarg :owned-by :accessor llm-model-owned-by :initform nil)))
+(defclass llm-usage ()
+  ((input-tokens :initarg :input-tokens :accessor llm-usage-input-tokens :initform nil)
+   (output-tokens :initarg :output-tokens :accessor llm-usage-output-tokens :initform nil)
+   (total-tokens :initarg :total-tokens :accessor llm-usage-total-tokens :initform nil)))
 
-(defun make-llm-model (&key id owned-by)
-  (make-instance 'llm-model :id id :owned-by owned-by))
+(defun make-llm-usage (&key input-tokens output-tokens total-tokens)
+  (make-instance 'llm-usage :input-tokens input-tokens
+                 :output-tokens output-tokens :total-tokens total-tokens))
 
-(defun llm-model-p (x)
-  (typep x 'llm-model))
+(defun llm-usage-p (x)
+  (typep x 'llm-usage))
 
-(defclass llm-result ()
-  ((message :initarg :message :accessor llm-result-message)
-   (model :initarg :model :accessor llm-result-model :initform nil)
-   (finish-reason :initarg :finish-reason :accessor llm-result-finish-reason
-                  :initform nil)
-   (usage :initarg :usage :accessor llm-result-usage :initform nil)))
+(defclass llm-response ()
+  ((parts :initarg :parts :accessor llm-response-parts :initform nil)
+   (model :initarg :model :accessor llm-response-model :initform nil)
+   (finish-reason :initarg :finish-reason :accessor llm-response-finish-reason
+                  :initform :stop)
+   (usage :initarg :usage :accessor llm-response-usage :initform nil)))
 
-(defun make-llm-result (&key message model finish-reason usage)
-  (make-instance 'llm-result :message message :model model
+(defun make-llm-response (&key parts model (finish-reason :stop) usage)
+  (make-instance 'llm-response :parts (copy-list parts) :model model
                  :finish-reason finish-reason :usage usage))
 
-(defun llm-result-p (x)
-  (typep x 'llm-result))
+(defun llm-response-p (x)
+  (typep x 'llm-response))
 
-(defun llm-result-text (result)
-  "Assistant text of RESULT, or NIL."
-  (let ((msg (and result (llm-result-message result))))
-    (and msg (llm-message-content msg))))
+(defclass llm-model-info ()
+  ((id :initarg :id :accessor llm-model-info-id)
+   (owned-by :initarg :owned-by :accessor llm-model-info-owned-by :initform nil)))
+
+(defun make-llm-model-info (&key id owned-by)
+  (make-instance 'llm-model-info :id id :owned-by owned-by))
+
+(defun llm-model-info-p (x)
+  (typep x 'llm-model-info))

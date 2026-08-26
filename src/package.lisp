@@ -10,23 +10,65 @@
            #:llm-http-error-body
 
            #:llm-backend
+           #:llm-backend-p
            #:*llm-backend*
+           #:backend-model
+           #:backend-supports-p
 
-           #:llm-message
-           #:make-llm-message
-           #:llm-message-p
-           #:llm-message-role
-           #:llm-message-content
-           #:llm-message-name
-           #:llm-message-tool-call-id
-           #:llm-message-tool-calls
+           #:llm-part
+           #:llm-part-p
+           #:llm-text-part
+           #:make-llm-text-part
+           #:llm-text-part-p
+           #:llm-text-part-text
+           #:llm-image-part
+           #:make-llm-image-part
+           #:llm-image-part-p
+           #:llm-image-part-url
+           #:llm-image-part-media-type
+           #:llm-image-part-data
+           #:llm-tool-call-part
+           #:make-llm-tool-call-part
+           #:llm-tool-call-part-p
+           #:llm-tool-call-part-id
+           #:llm-tool-call-part-name
+           #:llm-tool-call-part-arguments
+           #:llm-tool-result-part
+           #:make-llm-tool-result-part
+           #:llm-tool-result-part-p
+           #:llm-tool-result-part-id
+           #:llm-tool-result-part-name
+           #:llm-tool-result-part-content
+           #:llm-tool-result-part-error-p
+           #:llm-thinking-part
+           #:make-llm-thinking-part
+           #:llm-thinking-part-p
+           #:llm-thinking-part-text
+           #:llm-thinking-part-signature
 
-           #:llm-tool-call
-           #:make-llm-tool-call
-           #:llm-tool-call-p
-           #:llm-tool-call-id
-           #:llm-tool-call-name
-           #:llm-tool-call-arguments
+           #:llm-turn
+           #:make-llm-turn
+           #:llm-turn-p
+           #:llm-turn-role
+           #:llm-turn-parts
+           #:user-turn
+           #:system-turn
+           #:assistant-turn
+           #:tool-turn
+           #:coerce-turn
+           #:coerce-turns
+           #:turn-text
+
+           #:llm-settings
+           #:make-llm-settings
+           #:llm-settings-p
+           #:llm-settings-temperature
+           #:llm-settings-max-tokens
+           #:llm-settings-stop
+           #:llm-settings-top-p
+           #:llm-settings-response-format
+           #:llm-settings-extra
+           #:coerce-settings
 
            #:llm-tool
            #:make-llm-tool
@@ -35,23 +77,32 @@
            #:llm-tool-description
            #:llm-tool-parameters
 
-           #:llm-model
-           #:make-llm-model
-           #:llm-model-p
-           #:llm-model-id
-           #:llm-model-owned-by
+           #:llm-usage
+           #:make-llm-usage
+           #:llm-usage-p
+           #:llm-usage-input-tokens
+           #:llm-usage-output-tokens
+           #:llm-usage-total-tokens
 
-           #:llm-result
-           #:make-llm-result
-           #:llm-result-p
-           #:llm-result-message
-           #:llm-result-model
-           #:llm-result-finish-reason
-           #:llm-result-usage
-           #:llm-result-text
+           #:llm-response
+           #:make-llm-response
+           #:llm-response-p
+           #:llm-response-parts
+           #:llm-response-model
+           #:llm-response-finish-reason
+           #:llm-response-usage
+           #:llm-response-text
+           #:llm-response-thinking
+           #:llm-response-tool-calls
 
-           #:coerce-messages
+           #:llm-model-info
+           #:make-llm-model-info
+           #:llm-model-info-p
+           #:llm-model-info-id
+           #:llm-model-info-owned-by
+
            #:generate
+           #:stream-generate
            #:list-models
 
            #:mock-llm-backend
