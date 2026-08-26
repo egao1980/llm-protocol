@@ -21,7 +21,8 @@
     (backend-model (%ensure-backend))))
 
 (defgeneric backend-supports-p (backend feature)
-  (:documentation "Is FEATURE (:tools :stream :vision :thinking :structured-output) available?")
+  (:documentation "Wire-level probe. Client lookup of what can be done is
+capability-protocol: CAPABILITY-SUPPORTED-P on a catalogue (see llm-protocol/capability).")
   (:method ((backend llm-backend) feature)
     (declare (ignore feature))
     nil)

@@ -115,6 +115,8 @@
 
            #:llm-generation-adapter
            #:llm-generation-backend
-           #:make-llm-generation-adapter))
+           #:make-llm-generation-adapter
+           #:make-llm-catalogue
+           #:register-llm-backend))
 
 (in-package #:llm-protocol)
