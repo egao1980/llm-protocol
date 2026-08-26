@@ -10,7 +10,8 @@ CLOS **turns + typed parts** for [cl-stack](https://github.com/egao1980/cl-stack
 | [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` |
 | `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` |
 | `llm-protocol/schema` | `schema-protocol` + `schema-protocol-json` → `llm-response-output` |
-| `llm-protocol/mcp` | `make-mcp-sampling-handler` |
+
+MCP sampling (`create-message` → `generate`) is [`ai-agent-protocol/mcp`](https://github.com/egao1980/ai-agent-protocol) — **not** here.
 
 Brief: [`llm.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/llm.md) ([#195](https://github.com/egao1980/cl-stack/issues/195)).
 

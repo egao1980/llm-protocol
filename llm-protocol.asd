@@ -6,9 +6,7 @@
   :depends-on ()
   :properties (:cl-repo
                (:ci (:with ("llm-protocol/capability"
-                            "llm-protocol/mcp"
-                            "llm-protocol/schema")
-                     :sources (("rove" :ql)))))
+                            "llm-protocol/schema"))))
   :serial t
   :pathname "src"
   :components ((:file "package")
@@ -29,18 +27,6 @@
   :components ((:file "adapter"))
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
-(defsystem "llm-protocol/mcp"
-  :version "0.1.0"
-  :description "Optional MCP sampling-handler helper over llm-protocol:generate"
-  :author "egao1980"
-  :license "MIT"
-  :depends-on ("llm-protocol" "mcp-protocol")
-  :serial t
-  :pathname "src/mcp"
-  :components ((:file "package")
-               (:file "sampling"))
-  :in-order-to ((test-op (test-op "llm-protocol/tests"))))
-
 (defsystem "llm-protocol/schema"
   :version "0.1.0"
   :description "schema-protocol + schema-protocol-json structured output for llm-protocol"
@@ -56,7 +42,6 @@
 (defsystem "llm-protocol/tests"
   :depends-on ("llm-protocol"
                "llm-protocol/capability"
-               "llm-protocol/mcp"
                "llm-protocol/schema"
                "rove")
   :pathname "tests"
@@ -64,7 +49,6 @@
   :components ((:file "package")
                (:file "protocol-test")
                (:file "capability-test")
-               (:file "mcp-test")
                (:file "schema-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
