@@ -19,6 +19,7 @@
          (cat (llm-protocol:make-llm-catalogue backend)))
     (ok (capability-protocol:capability-supported-p cat :llm-generation))
     (ok (capability-protocol:capability-supported-p cat :llm-tools))
+    (ok (capability-protocol:capability-supported-p cat :llm-responses))
     (ng (capability-protocol:capability-supported-p cat :llm-vision))
     (ok (capability-protocol:catalogue-defines-p cat :llm-vision))
     (let ((gen (capability-protocol:get-capability cat :llm-generation)))
@@ -32,14 +33,3 @@
       (llm-protocol:register-llm-backend bb backend)
       (ok (capability-protocol:capability-supported-p bb :llm-tools))
       (ng (capability-protocol:capability-supported-p bb :llm-vision)))))
-
-(deftest openai-catalogue
-  (let ((cat (llm-protocol:make-llm-catalogue
-              (llm-backend-openai:make-openai-compat-backend))))
-    (ok (capability-protocol:capability-supported-p cat :llm-vision))
-    (ok (capability-protocol:capability-supported-p cat :llm-structured-output))
-    (ng (capability-protocol:capability-supported-p cat :llm-video))
-    (let ((gen (capability-protocol:get-capability cat :llm-generation)))
-      (ng (find 'capability-protocol:stream-complete
-                (capability-protocol:capability-operations gen)
-                :key #'capability-protocol:capability-operation-name)))))

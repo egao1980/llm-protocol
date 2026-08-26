@@ -84,10 +84,41 @@
            #:llm-usage-output-tokens
            #:llm-usage-total-tokens
 
+           #:llm-item
+           #:llm-item-p
+           #:llm-item-id
+           #:llm-message-item
+           #:make-llm-message-item
+           #:llm-message-item-p
+           #:llm-message-item-role
+           #:llm-message-item-parts
+           #:llm-function-call-item
+           #:make-llm-function-call-item
+           #:llm-function-call-item-p
+           #:llm-function-call-item-call-id
+           #:llm-function-call-item-name
+           #:llm-function-call-item-arguments
+           #:llm-function-call-output-item
+           #:make-llm-function-call-output-item
+           #:llm-function-call-output-item-p
+           #:llm-function-call-output-item-call-id
+           #:llm-function-call-output-item-output
+           #:llm-reasoning-item
+           #:make-llm-reasoning-item
+           #:llm-reasoning-item-p
+           #:llm-reasoning-item-text
+           #:llm-reasoning-item-signature
+           #:coerce-item
+           #:coerce-items
+           #:items->turns
+           #:turns->items
+
            #:llm-response
            #:make-llm-response
            #:llm-response-p
            #:llm-response-parts
+           #:llm-response-items
+           #:llm-response-id
            #:llm-response-model
            #:llm-response-finish-reason
            #:llm-response-usage
@@ -103,6 +134,8 @@
 
            #:generate
            #:stream-generate
+           #:respond
+           #:stream-respond
            #:list-models
 
            #:mock-llm-backend

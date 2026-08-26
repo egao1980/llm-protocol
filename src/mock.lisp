@@ -31,6 +31,9 @@
 (defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :stream)))
   t)
 
+(defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :responses)))
+  t)
+
 (defmethod generate ((backend mock-llm-backend) turns &key model settings tools
                      tool-choice)
   (let ((normalized (coerce-turns turns)))

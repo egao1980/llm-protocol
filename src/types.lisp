@@ -142,16 +142,70 @@
 (defun llm-usage-p (x)
   (typep x 'llm-usage))
 
+(defclass llm-item ()
+  ((id :initarg :id :accessor llm-item-id :initform nil))
+  (:documentation "Responses-style grain. Role lives on LLM-MESSAGE-ITEM only."))
+
+(defun llm-item-p (x)
+  (typep x 'llm-item))
+
+(defclass llm-message-item (llm-item)
+  ((role :initarg :role :accessor llm-message-item-role :initform :user)
+   (parts :initarg :parts :accessor llm-message-item-parts :initform nil)))
+
+(defun make-llm-message-item (&key id (role :user) parts)
+  (make-instance 'llm-message-item :id id :role role :parts (copy-list parts)))
+
+(defun llm-message-item-p (x)
+  (typep x 'llm-message-item))
+
+(defclass llm-function-call-item (llm-item)
+  ((call-id :initarg :call-id :accessor llm-function-call-item-call-id :initform nil)
+   (name :initarg :name :accessor llm-function-call-item-name)
+   (arguments :initarg :arguments :accessor llm-function-call-item-arguments
+              :initform "{}")))
+
+(defun make-llm-function-call-item (&key id call-id name (arguments "{}"))
+  (make-instance 'llm-function-call-item
+                 :id id :call-id (or call-id id) :name name :arguments arguments))
+
+(defun llm-function-call-item-p (x)
+  (typep x 'llm-function-call-item))
+
+(defclass llm-function-call-output-item (llm-item)
+  ((call-id :initarg :call-id :accessor llm-function-call-output-item-call-id)
+   (output :initarg :output :accessor llm-function-call-output-item-output
+           :initform "")))
+
+(defun make-llm-function-call-output-item (&key id call-id (output ""))
+  (make-instance 'llm-function-call-output-item
+                 :id id :call-id call-id :output output))
+
+(defun llm-function-call-output-item-p (x)
+  (typep x 'llm-function-call-output-item))
+
+(defclass llm-reasoning-item (llm-item)
+  ((text :initarg :text :accessor llm-reasoning-item-text :initform "")
+   (signature :initarg :signature :accessor llm-reasoning-item-signature :initform nil)))
+
+(defun make-llm-reasoning-item (&key id (text "") signature)
+  (make-instance 'llm-reasoning-item :id id :text text :signature signature))
+
+(defun llm-reasoning-item-p (x)
+  (typep x 'llm-reasoning-item))
+
 (defclass llm-response ()
   ((parts :initarg :parts :accessor llm-response-parts :initform nil)
+   (items :initarg :items :accessor llm-response-items :initform nil)
+   (id :initarg :id :accessor llm-response-id :initform nil)
    (model :initarg :model :accessor llm-response-model :initform nil)
    (finish-reason :initarg :finish-reason :accessor llm-response-finish-reason
                   :initform :stop)
    (usage :initarg :usage :accessor llm-response-usage :initform nil)))
 
-(defun make-llm-response (&key parts model (finish-reason :stop) usage)
-  (make-instance 'llm-response :parts (copy-list parts) :model model
-                 :finish-reason finish-reason :usage usage))
+(defun make-llm-response (&key parts items id model (finish-reason :stop) usage)
+  (make-instance 'llm-response :parts (copy-list parts) :items (copy-list items)
+                 :id id :model model :finish-reason finish-reason :usage usage))
 
 (defun llm-response-p (x)
   (typep x 'llm-response))

@@ -5,8 +5,7 @@
   :license "MIT"
   :depends-on ()
   :properties (:cl-repo
-               (:ci (:with ("llm-backend-openai"
-                            "llm-protocol/capability"
+               (:ci (:with ("llm-protocol/capability"
                             "llm-protocol/mcp")
                      :sources (("rove" :ql)))))
   :serial t
@@ -45,13 +44,11 @@
   :depends-on ("llm-protocol"
                "llm-protocol/capability"
                "llm-protocol/mcp"
-               "llm-backend-openai"
                "rove")
   :pathname "tests"
   :serial t
   :components ((:file "package")
                (:file "protocol-test")
-               (:file "openai-test")
                (:file "capability-test")
                (:file "mcp-test"))
   :perform (test-op (o c)

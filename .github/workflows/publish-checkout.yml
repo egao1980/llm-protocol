@@ -15,23 +15,10 @@ on:
         type: string
 
 jobs:
-  publish-llm:
+  publish:
     uses: egao1980/cl-repository/.github/workflows/publish-source.yml@main
     with:
       system: llm-protocol
-      version: ${{ inputs.version }}
-      packager-version: ${{ inputs.packager_version }}
-    permissions:
-      contents: read
-      packages: write
-
-  # Colocated; canned publish.lisp forces provides=(system). Second package
-  # so cl-repo:load-system "llm-backend-openai" resolves.
-  publish-openai:
-    needs: publish-llm
-    uses: egao1980/cl-repository/.github/workflows/publish-source.yml@main
-    with:
-      system: llm-backend-openai
       version: ${{ inputs.version }}
       packager-version: ${{ inputs.packager_version }}
     permissions:
