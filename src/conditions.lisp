@@ -23,15 +23,25 @@
   (:report (lambda (c s)
              (format s "llm unsupported~@[: ~a~]" (llm-error-message c)))))
 
+(defun http-status-retryable-p (status)
+  "T for 408 / 409 / 429 / 5xx."
+  (and (integerp status)
+       (or (= status 408) (= status 409) (= status 429) (>= status 500))))
+
 (define-condition llm-http-error (llm-error)
   ((status :initarg :status :reader llm-http-error-status :initform nil)
    (body :initarg :body :reader llm-http-error-body :initform nil)
-   (retryable-p :initarg :retryable-p :reader llm-http-error-retryable-p
-                :initform nil))
+   (retryable-p :initarg :retryable-p))
   (:report (lambda (c s)
              (format s "llm HTTP error~@[ ~a~]~@[: ~a~]"
                      (llm-http-error-status c)
                      (or (llm-error-message c) (llm-http-error-body c))))))
+
+(defun llm-http-error-retryable-p (condition)
+  "Explicit :RETRYABLE-P if supplied, otherwise derived from STATUS."
+  (if (slot-boundp condition 'retryable-p)
+      (slot-value condition 'retryable-p)
+      (http-status-retryable-p (llm-http-error-status condition))))
 
 (define-condition llm-output-error (llm-error)
   ((response :initarg :response :accessor llm-output-error-response :initform nil)
@@ -39,18 +49,6 @@
   (:report (lambda (c s)
              (format s "llm structured output error~@[: ~a~]"
                      (llm-error-message c)))))
-
-(defun http-status-retryable-p (status)
-  "T for 408 / 409 / 429 / 5xx."
-  (and (integerp status)
-       (or (= status 408) (= status 409) (= status 429) (>= status 500))))
-
-(defmethod initialize-instance :after ((c llm-http-error)
-                                       &key (retryable-p nil retryable-supplied-p))
-  (declare (ignore retryable-p))
-  (unless retryable-supplied-p
-    (setf (slot-value c 'retryable-p)
-          (http-status-retryable-p (llm-http-error-status c)))))
 
 ;;; --- restart helpers -------------------------------------------------------
 
@@ -96,18 +94,18 @@
     (when r (invoke-restart r))))
 
 (defun auto-retry (condition)
-  "HANDLER-BIND: RETRY only when LLM-HTTP-ERROR-RETRYABLE-P."
-  (if (and (typep condition 'llm-http-error)
-           (llm-http-error-retryable-p condition)
-           (find-restart 'retry condition))
-      (invoke-retry condition)
-      (error condition)))
+  "HANDLER-BIND: RETRY only when LLM-HTTP-ERROR-RETRYABLE-P.
+   Decline (return) when the error is not retryable so outer handlers run."
+  (when (and (typep condition 'llm-http-error)
+             (llm-http-error-retryable-p condition)
+             (find-restart 'retry condition))
+    (invoke-retry condition)))
 
 (defun auto-ignore-output (condition)
-  "HANDLER-BIND: IGNORE-OUTPUT on LLM-OUTPUT-ERROR."
-  (if (find-restart 'ignore-output condition)
-      (invoke-ignore-output condition)
-      (error condition)))
+  "HANDLER-BIND: IGNORE-OUTPUT on LLM-OUTPUT-ERROR.
+   Decline (return) when the restart is not active so outer handlers run."
+  (when (find-restart 'ignore-output condition)
+    (invoke-ignore-output condition)))
 
 (defmacro with-auto-retry (&body body)
   `(handler-bind ((llm-http-error #'auto-retry))

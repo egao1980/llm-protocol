@@ -16,17 +16,17 @@
        (make-condition 'llm-protocol:llm-http-error :status 400 :retryable-p t))))
 
 (deftest generate-retry-then-succeed
-  (let ((n 0)
-        (b (llm-protocol:make-mock-llm-backend
-            :handler (lambda (backend turns &key &allow-other-keys)
-                       (declare (ignore backend turns))
-                       (incf n)
-                       (if (= n 1)
-                           (error 'llm-protocol:llm-http-error
-                                  :status 429 :message "rate" :retryable-p t)
-                           (llm-protocol:make-llm-response
-                            :parts (list (llm-protocol:make-llm-text-part :text "ok"))
-                            :model "mock"))))))
+  (let* ((n 0)
+         (b (llm-protocol:make-mock-llm-backend
+             :handler (lambda (backend turns &key &allow-other-keys)
+                        (declare (ignore backend turns))
+                        (incf n)
+                        (if (= n 1)
+                            (error 'llm-protocol:llm-http-error
+                                   :status 429 :message "rate" :retryable-p t)
+                            (llm-protocol:make-llm-response
+                             :parts (list (llm-protocol:make-llm-text-part :text "ok"))
+                             :model "mock"))))))
     (ok (equal "ok" (llm-protocol:llm-response-text
                      (llm-protocol:with-auto-retry
                        (llm-protocol:generate b "hi")))))
@@ -50,13 +50,13 @@
                   (llm-protocol:generate b "hi")))))))
 
 (deftest generate-non-retryable-does-not-auto-retry
-  (let ((n 0)
-        (b (llm-protocol:make-mock-llm-backend
-            :handler (lambda (backend turns &key &allow-other-keys)
-                       (declare (ignore backend turns))
-                       (incf n)
-                       (error 'llm-protocol:llm-http-error
-                              :status 400 :message "bad" :retryable-p nil)))))
+  (let* ((n 0)
+         (b (llm-protocol:make-mock-llm-backend
+             :handler (lambda (backend turns &key &allow-other-keys)
+                        (declare (ignore backend turns))
+                        (incf n)
+                        (error 'llm-protocol:llm-http-error
+                               :status 400 :message "bad" :retryable-p nil)))))
     (ok (signals (llm-protocol:with-auto-retry (llm-protocol:generate b "hi"))
                  'llm-protocol:llm-http-error))
     (ok (= 1 n))))
