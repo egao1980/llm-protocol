@@ -28,6 +28,22 @@
     (ok (llm-protocol:llm-text-part-p
          (first (llm-protocol:llm-response-content r))))))
 
+(deftest structured-output-json-without-schema
+  (let* ((b (llm-protocol:make-mock-llm-backend
+             :handler (lambda (backend turns &key &allow-other-keys)
+                        (declare (ignore backend turns))
+                        (llm-protocol:make-llm-response
+                         :parts (list (llm-protocol:make-llm-text-part
+                                       :text "{\"name\":\"Oslo\",\"country\":\"NO\"}"))
+                         :model "mock"))))
+         (r (llm-protocol:generate b "city"))
+         (out (llm-protocol:llm-response-output r)))
+    (ok (hash-table-p out))
+    (ok (equal "Oslo" (gethash "name" out)))
+    (ok (null (llm-protocol:llm-response-output
+               (llm-protocol:generate
+                (llm-protocol:make-mock-llm-backend) "hi"))))))
+
 (deftest structured-output-invalid
   (let ((b (llm-protocol:make-mock-llm-backend
             :handler (lambda (backend turns &key &allow-other-keys)

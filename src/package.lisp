@@ -1,16 +1,27 @@
 (defpackage #:llm-protocol
   (:use #:cl)
   (:nicknames #:stack-llm)
-  (:export            #:llm-error
+  (:export #:llm-error
            #:llm-error-message
            #:llm-missing-backend
            #:llm-unsupported
            #:llm-http-error
            #:llm-http-error-status
            #:llm-http-error-body
+           #:llm-http-error-retryable-p
+           #:http-status-retryable-p
            #:llm-output-error
            #:llm-output-error-response
            #:llm-output-error-cause
+           #:call-with-llm-restarts
+           #:with-llm-restarts
+           #:invoke-retry
+           #:invoke-use-value
+           #:invoke-ignore-output
+           #:auto-retry
+           #:auto-ignore-output
+           #:with-auto-retry
+           #:with-auto-ignore-output
 
            #:llm-backend
            #:llm-backend-p
@@ -133,6 +144,7 @@
            #:llm-response-output
            #:parse-structured-output
            #:structured-output-json-schema
+           #:try-parse-json-output
 
            #:llm-model-info
            #:make-llm-model-info

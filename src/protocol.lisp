@@ -11,8 +11,12 @@
 
 (defun %ensure-backend (&optional (backend *llm-backend*))
   (or backend
-      (error 'llm-missing-backend
-             :message "*llm-backend* is nil — load a backend or pass one to GENERATE")))
+      (restart-case
+          (error 'llm-missing-backend
+                 :message "*llm-backend* is nil — load a backend or pass one to GENERATE")
+        (use-value (value)
+          :report "Use a supplied LLM-BACKEND"
+          value))))
 
 (defgeneric backend-model (backend)
   (:documentation "Default model name for BACKEND, or NIL.")
@@ -445,34 +449,84 @@ Hash-tables pass through. CLOS schemas need llm-protocol/schema (schema-protocol
 
 (defgeneric parse-structured-output (schema source)
   (:documentation "Parse SOURCE (JSON string or table) into SCHEMA.
+NIL schema = JSON if SOURCE looks like JSON, else NIL.
 CLOS designators need llm-protocol/schema.")
+  (:method ((schema null) source)
+    (try-parse-json-output source))
   (:method ((schema hash-table) (source hash-table))
     (declare (ignore schema))
     source)
   (:method ((schema hash-table) (source string))
-    "Wire-only until llm-protocol/schema is loaded."
-    (declare (ignore schema source))
-    nil)
+    (or (try-parse-json-output source) source))
   (:method (schema source)
     (declare (ignore source))
     (error 'llm-output-error
            :message (format nil "load llm-protocol/schema to parse output as ~s" schema))))
 
+(defun %trimmed-text (source)
+  (cond
+    ((null source) "")
+    ((stringp source) (string-trim '(#\Space #\Tab #\Newline #\Return) source))
+    (t "")))
+
+(defun %looks-like-json (source)
+  (let ((s (%trimmed-text source)))
+    (and (plusp (length s))
+         (let ((c (char s 0)))
+           (or (char= c #\{) (char= c #\[))))))
+
+(defun try-parse-json-output (source)
+  "Decode SOURCE as JSON when it looks like an object/array. Else NIL.
+   Soft-uses json-protocol when a backend is bound."
+  (cond
+    ((hash-table-p source) source)
+    ((and (vectorp source) (not (stringp source))) source)
+    ((not (%looks-like-json source)) nil)
+    (t
+     (let* ((pkg (find-package '#:json-protocol))
+            (decode (and pkg (find-symbol "DECODE" pkg)))
+            (backend (and pkg (find-symbol "*JSON-BACKEND*" pkg))))
+       (when (and decode (fboundp decode) backend (symbol-value backend))
+         (ignore-errors (funcall decode (%trimmed-text source))))))))
+
+(defun %signal-output-error (response err &optional cause)
+  (when (typep err 'llm-output-error)
+    (setf (llm-output-error-response err) response))
+  (let ((condition (if (typep err 'llm-output-error)
+                       err
+                       (make-condition 'llm-output-error
+                                       :message (princ-to-string err)
+                                       :response response
+                                       :cause (or cause err)))))
+    (restart-case (error condition)
+      (use-value (parsed)
+        :report "Use a supplied parsed output"
+        :interactive (lambda ()
+                       (format *query-io* "Parsed output: ")
+                       (force-output *query-io*)
+                       (list (read *query-io*)))
+        (setf (llm-response-output response) parsed)
+        parsed)
+      (ignore-output ()
+        :report "Leave LLM-RESPONSE-OUTPUT NIL"
+        nil))))
+
 (defun %attach-structured-output (response settings)
-  (let ((schema (and settings (llm-settings-output settings))))
-    (when (and schema response (null (llm-response-output response)))
-      (handler-case
-          (let ((out (parse-structured-output schema (llm-response-text response))))
+  (when (and response (null (llm-response-output response)))
+    (let ((schema (and settings (llm-settings-output settings)))
+          (text (llm-response-text response)))
+      (if schema
+          (handler-case
+              (let ((out (parse-structured-output schema text)))
+                (when out
+                  (setf (llm-response-output response) out)))
+            (llm-output-error (e)
+              (%signal-output-error response e))
+            (error (e)
+              (%signal-output-error response e e)))
+          (let ((out (try-parse-json-output text)))
             (when out
-              (setf (llm-response-output response) out)))
-        (llm-output-error (e)
-          (setf (llm-output-error-response e) response)
-          (error e))
-        (error (e)
-          (error 'llm-output-error
-                 :message (princ-to-string e)
-                 :response response
-                 :cause e)))))
+              (setf (llm-response-output response) out))))))
   response)
 
 (defgeneric generate (backend turns &key model settings tools tool-choice output)
@@ -498,15 +552,16 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
   (:documentation "→ list of LLM-MODEL-INFO."))
 
 (defun %call-with-output (fn backend payload args)
-  (let* ((settings (getf args :settings))
-         (output (getf args :output))
-         (effective (%settings-with-output settings output))
-         (pass (loop for (k v) on args by #'cddr
-                     unless (member k '(:settings :output))
-                       collect k and collect v))
-         (r (apply fn backend payload :settings effective pass)))
-    (%attach-structured-output r effective)
-    r))
+  (with-llm-restarts
+    (let* ((settings (getf args :settings))
+           (output (getf args :output))
+           (effective (%settings-with-output settings output))
+           (pass (loop for (k v) on args by #'cddr
+                       unless (member k '(:settings :output))
+                         collect k and collect v))
+           (r (apply fn backend payload :settings effective pass)))
+      (%attach-structured-output r effective)
+      r)))
 
 (defmethod generate :around ((backend llm-backend) turns &rest args
                              &key &allow-other-keys)
@@ -535,6 +590,10 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
 
 (defmethod stream-respond ((backend null) items &rest args &key &allow-other-keys)
   (apply #'stream-respond (%ensure-backend) items args))
+
+(defmethod list-models :around ((backend llm-backend) &key)
+  (with-llm-restarts
+    (call-next-method)))
 
 (defmethod list-models ((backend null) &key)
   (list-models (%ensure-backend)))
