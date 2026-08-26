@@ -108,12 +108,16 @@
    (top-p :initarg :top-p :accessor llm-settings-top-p :initform nil)
    (response-format :initarg :response-format :accessor llm-settings-response-format
                     :initform nil)
+   (output :initarg :output :accessor llm-settings-output :initform nil
+           :documentation "schema-protocol designator, JSON Schema hash, or NIL.")
    (extra :initarg :extra :accessor llm-settings-extra :initform nil)))
 
-(defun make-llm-settings (&key temperature max-tokens stop top-p response-format extra)
+(defun make-llm-settings (&key temperature max-tokens stop top-p response-format
+                            output extra)
   (make-instance 'llm-settings
                  :temperature temperature :max-tokens max-tokens :stop stop
-                 :top-p top-p :response-format response-format :extra extra))
+                 :top-p top-p :response-format response-format
+                 :output output :extra extra))
 
 (defun llm-settings-p (x)
   (typep x 'llm-settings))
@@ -201,11 +205,14 @@
    (model :initarg :model :accessor llm-response-model :initform nil)
    (finish-reason :initarg :finish-reason :accessor llm-response-finish-reason
                   :initform :stop)
-   (usage :initarg :usage :accessor llm-response-usage :initform nil)))
+   (usage :initarg :usage :accessor llm-response-usage :initform nil)
+   (output :initarg :output :accessor llm-response-output :initform nil
+           :documentation "Parsed structured output (schema-protocol instance), or NIL.")))
 
-(defun make-llm-response (&key parts items id model (finish-reason :stop) usage)
+(defun make-llm-response (&key parts items id model (finish-reason :stop) usage output)
   (make-instance 'llm-response :parts (copy-list parts) :items (copy-list items)
-                 :id id :model model :finish-reason finish-reason :usage usage))
+                 :id id :model model :finish-reason finish-reason :usage usage
+                 :output output))
 
 (defun llm-response-p (x)
   (typep x 'llm-response))

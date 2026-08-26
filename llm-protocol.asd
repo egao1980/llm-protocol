@@ -6,7 +6,8 @@
   :depends-on ()
   :properties (:cl-repo
                (:ci (:with ("llm-protocol/capability"
-                            "llm-protocol/mcp")
+                            "llm-protocol/mcp"
+                            "llm-protocol/schema")
                      :sources (("rove" :ql)))))
   :serial t
   :pathname "src"
@@ -40,17 +41,31 @@
                (:file "sampling"))
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
+(defsystem "llm-protocol/schema"
+  :version "0.1.0"
+  :description "schema-protocol + schema-protocol-json structured output for llm-protocol"
+  :author "egao1980"
+  :license "MIT"
+  :depends-on ("llm-protocol" "schema-protocol" "schema-protocol-json"
+               "json-protocol" "json-backend-jzon")
+  :serial t
+  :pathname "src/schema"
+  :components ((:file "adapter"))
+  :in-order-to ((test-op (test-op "llm-protocol/tests"))))
+
 (defsystem "llm-protocol/tests"
   :depends-on ("llm-protocol"
                "llm-protocol/capability"
                "llm-protocol/mcp"
+               "llm-protocol/schema"
                "rove")
   :pathname "tests"
   :serial t
   :components ((:file "package")
                (:file "protocol-test")
                (:file "capability-test")
-               (:file "mcp-test"))
+               (:file "mcp-test")
+               (:file "schema-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))

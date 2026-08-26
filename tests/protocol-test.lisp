@@ -88,6 +88,14 @@
   (ok (zerop (llm-protocol:llm-settings-temperature
               (llm-protocol:coerce-settings '(:temperature 0))))))
 
+(deftest reasoning-text-part
+  (let* ((h (make-hash-table :test 'equal)))
+    (setf (gethash "type" h) "reasoning_text"
+          (gethash "text" h) "scratch")
+    (let ((p (llm-protocol::%coerce-part h)))
+      (ok (llm-protocol:llm-thinking-part-p p))
+      (ok (equal "scratch" (llm-protocol:llm-thinking-part-text p))))))
+
 (deftest items-roundtrip
   (let* ((turns (list (llm-protocol:system-turn "be brief")
                       (llm-protocol:user-turn "ping")

@@ -31,11 +31,15 @@
 (defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :stream)))
   t)
 
+(defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :structured-output)))
+  t)
+
 (defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :responses)))
   t)
 
 (defmethod generate ((backend mock-llm-backend) turns &key model settings tools
-                     tool-choice)
+                     tool-choice output)
+  (declare (ignore output))
   (let ((normalized (coerce-turns turns)))
     (if (mock-llm-handler backend)
         (funcall (mock-llm-handler backend) backend normalized
@@ -58,9 +62,9 @@
            :finish-reason (if tcs :tool-use :stop))))))
 
 (defmethod stream-generate ((backend mock-llm-backend) turns &key model settings
-                            tools tool-choice on-part)
+                            tools tool-choice on-part output)
   (let ((response (generate backend turns :model model :settings settings
-                            :tools tools :tool-choice tool-choice)))
+                            :tools tools :tool-choice tool-choice :output output)))
     (when on-part
       (dolist (part (llm-response-parts response))
         (funcall on-part part)))

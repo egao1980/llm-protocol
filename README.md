@@ -9,6 +9,7 @@ CLOS **turns + typed parts** for [cl-stack](https://github.com/egao1980/cl-stack
 | `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, mock |
 | [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` |
 | `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` |
+| `llm-protocol/schema` | `schema-protocol` + `schema-protocol-json` → `llm-response-output` |
 | `llm-protocol/mcp` | `make-mcp-sampling-handler` |
 
 Brief: [`llm.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/llm.md) ([#195](https://github.com/egao1980/cl-stack/issues/195)).
@@ -40,6 +41,19 @@ Lookup **what a backend can do** is `capability-protocol`, not a second flag obj
   (stack-capability:capability-supported-p cat :llm-responses)  ; T (mock)
   (stack-capability:capability-supported-p cat :llm-vision))    ; NIL
 ```
+
+Structured output is `schema-protocol` (`defschema`) + `schema-protocol-json` (JSON Schema emit). Not a PydanticAI `Agent`:
+
+```lisp
+(asdf:load-system "llm-protocol/schema")
+(stack-schema:defschema city ()
+  (name string)
+  (country string))
+(let ((r (stack-llm:generate b "Oslo" :output 'city)))
+  (slot-value (stack-llm:llm-response-output r) 'name))
+```
+
+Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-text` (text parts only), `llm-response-thinking` (reasoning).
 
 ## License
 

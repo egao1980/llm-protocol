@@ -133,7 +133,7 @@ capability-protocol: CAPABILITY-SUPPORTED-P on a catalogue (see llm-protocol/cap
                                        (gethash "output" part)
                                        (gethash "result" part)))
            :error-p (or (gethash "is_error" part) (gethash "isError" part))))
-         ((:thinking :reasoning :reasoning-content)
+         ((:thinking :reasoning :reasoning-content :reasoning-text)
           (make-llm-thinking-part
            :text (%content-text (or (gethash "thinking" part) (gethash "text" part)))
            :signature (gethash "signature" part)))
@@ -391,6 +391,23 @@ items is an error — use COERCE-ITEMS.")
     (llm-settings object)
     (list (apply #'make-llm-settings object))))
 
+(defun copy-llm-settings (settings &key (output nil outputp))
+  (make-llm-settings
+   :temperature (llm-settings-temperature settings)
+   :max-tokens (llm-settings-max-tokens settings)
+   :stop (llm-settings-stop settings)
+   :top-p (llm-settings-top-p settings)
+   :response-format (llm-settings-response-format settings)
+   :output (if outputp output (llm-settings-output settings))
+   :extra (llm-settings-extra settings)))
+
+(defun %settings-with-output (settings output)
+  (let ((s (coerce-settings settings)))
+    (cond
+      ((null output) s)
+      ((null s) (make-llm-settings :output output))
+      (t (copy-llm-settings s :output output)))))
+
 (defun llm-response-text (response)
   "Assistant text parts only (not thinking)."
   (when response
@@ -399,6 +416,10 @@ items is an error — use COERCE-ITEMS.")
         (let ((tx (part-text part)))
           (when (and tx (plusp (length tx)))
             (write-string tx s)))))))
+
+(defun llm-response-content (response)
+  "Content blocks (same object as LLM-RESPONSE-PARTS)."
+  (and response (llm-response-parts response)))
 
 (defun llm-response-thinking (response)
   (when response
@@ -413,70 +434,138 @@ items is an error — use COERCE-ITEMS.")
   (when response
     (remove-if-not #'llm-tool-call-part-p (llm-response-parts response))))
 
-(defgeneric generate (backend turns &key model settings tools tool-choice)
+(defgeneric structured-output-json-schema (schema)
+  (:documentation "JSON Schema hash-table for SCHEMA (OpenAI json_schema.schema).
+Hash-tables pass through. CLOS schemas need llm-protocol/schema (schema-protocol-json).")
+  (:method ((schema hash-table))
+    schema)
+  (:method (schema)
+    (error 'llm-output-error
+           :message (format nil "load llm-protocol/schema to emit JSON Schema for ~s" schema))))
+
+(defgeneric parse-structured-output (schema source)
+  (:documentation "Parse SOURCE (JSON string or table) into SCHEMA.
+CLOS designators need llm-protocol/schema.")
+  (:method ((schema hash-table) (source hash-table))
+    (declare (ignore schema))
+    source)
+  (:method ((schema hash-table) (source string))
+    "Wire-only until llm-protocol/schema is loaded."
+    (declare (ignore schema source))
+    nil)
+  (:method (schema source)
+    (declare (ignore source))
+    (error 'llm-output-error
+           :message (format nil "load llm-protocol/schema to parse output as ~s" schema))))
+
+(defun %attach-structured-output (response settings)
+  (let ((schema (and settings (llm-settings-output settings))))
+    (when (and schema response (null (llm-response-output response)))
+      (handler-case
+          (let ((out (parse-structured-output schema (llm-response-text response))))
+            (when out
+              (setf (llm-response-output response) out)))
+        (llm-output-error (e)
+          (setf (llm-output-error-response e) response)
+          (error e))
+        (error (e)
+          (error 'llm-output-error
+                 :message (princ-to-string e)
+                 :response response
+                 :cause e)))))
+  response)
+
+(defgeneric generate (backend turns &key model settings tools tool-choice output)
   (:documentation "One-shot generation. TURNS: string, LLM-TURN, or a sequence of those.
 TOOLS are descriptors (LLM-TOOL), not executors. SETTINGS is LLM-SETTINGS or a plist.
-→ LLM-RESPONSE."))
+OUTPUT is a schema-protocol designator (or JSON Schema hash) — parsed into
+LLM-RESPONSE-OUTPUT. → LLM-RESPONSE."))
 
-(defgeneric stream-generate (backend turns &key model settings tools tool-choice on-part)
+(defgeneric stream-generate (backend turns &key model settings tools tool-choice
+                             on-part output)
   (:documentation "Streaming sibling of GENERATE. ON-PART is called with each LLM-PART.
 Default method signals LLM-UNSUPPORTED. → LLM-RESPONSE when the stream ends."))
 
-(defgeneric respond (backend items &key model settings tools tool-choice)
+(defgeneric respond (backend items &key model settings tools tool-choice output)
   (:documentation "Responses-style one-shot. ITEMS: string, LLM-ITEM, LLM-TURN, or a
 sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS + PARTS)."))
 
-(defgeneric stream-respond (backend items &key model settings tools tool-choice on-part)
+(defgeneric stream-respond (backend items &key model settings tools tool-choice
+                            on-part output)
   (:documentation "Streaming sibling of RESPOND. Default: STREAM-GENERATE after ITEMS->TURNS."))
 
 (defgeneric list-models (backend &key)
   (:documentation "→ list of LLM-MODEL-INFO."))
 
-(defmethod generate ((backend null) turns &key model settings tools tool-choice)
-  (generate (%ensure-backend) turns :model model :settings settings
-            :tools tools :tool-choice tool-choice))
+(defun %call-with-output (fn backend payload args)
+  (let* ((settings (getf args :settings))
+         (output (getf args :output))
+         (effective (%settings-with-output settings output))
+         (pass (loop for (k v) on args by #'cddr
+                     unless (member k '(:settings :output))
+                       collect k and collect v))
+         (r (apply fn backend payload :settings effective pass)))
+    (%attach-structured-output r effective)
+    r))
 
-(defmethod stream-generate ((backend null) turns &key model settings tools
-                            tool-choice on-part)
-  (stream-generate (%ensure-backend) turns :model model :settings settings
-                   :tools tools :tool-choice tool-choice :on-part on-part))
+(defmethod generate :around ((backend llm-backend) turns &rest args
+                             &key &allow-other-keys)
+  (%call-with-output #'call-next-method backend turns args))
 
-(defmethod respond ((backend null) items &key model settings tools tool-choice)
-  (respond (%ensure-backend) items :model model :settings settings
-           :tools tools :tool-choice tool-choice))
+(defmethod stream-generate :around ((backend llm-backend) turns &rest args
+                                    &key &allow-other-keys)
+  (%call-with-output #'call-next-method backend turns args))
 
-(defmethod stream-respond ((backend null) items &key model settings tools
-                           tool-choice on-part)
-  (stream-respond (%ensure-backend) items :model model :settings settings
-                  :tools tools :tool-choice tool-choice :on-part on-part))
+(defmethod respond :around ((backend llm-backend) items &rest args
+                            &key &allow-other-keys)
+  (%call-with-output #'call-next-method backend items args))
+
+(defmethod stream-respond :around ((backend llm-backend) items &rest args
+                                   &key &allow-other-keys)
+  (%call-with-output #'call-next-method backend items args))
+
+(defmethod generate ((backend null) turns &rest args &key &allow-other-keys)
+  (apply #'generate (%ensure-backend) turns args))
+
+(defmethod stream-generate ((backend null) turns &rest args &key &allow-other-keys)
+  (apply #'stream-generate (%ensure-backend) turns args))
+
+(defmethod respond ((backend null) items &rest args &key &allow-other-keys)
+  (apply #'respond (%ensure-backend) items args))
+
+(defmethod stream-respond ((backend null) items &rest args &key &allow-other-keys)
+  (apply #'stream-respond (%ensure-backend) items args))
 
 (defmethod list-models ((backend null) &key)
   (list-models (%ensure-backend)))
 
-(defmethod generate ((backend llm-backend) turns &key model settings tools tool-choice)
-  (declare (ignore turns model settings tools tool-choice))
+(defmethod generate ((backend llm-backend) turns &key model settings tools tool-choice
+                     output)
+  (declare (ignore turns model settings tools tool-choice output))
   (error 'llm-unsupported
          :message (format nil "~a does not implement generate" (class-of backend))))
 
 (defmethod stream-generate ((backend llm-backend) turns &key model settings tools
-                            tool-choice on-part)
-  (declare (ignore turns model settings tools tool-choice on-part))
+                            tool-choice on-part output)
+  (declare (ignore turns model settings tools tool-choice on-part output))
   (error 'llm-unsupported
          :message (format nil "~a does not implement stream-generate" (class-of backend))))
 
-(defmethod respond ((backend llm-backend) items &key model settings tools tool-choice)
+(defmethod respond ((backend llm-backend) items &key model settings tools tool-choice
+                    output)
   (let ((r (generate backend (items->turns items)
                      :model model :settings settings
-                     :tools tools :tool-choice tool-choice)))
+                     :tools tools :tool-choice tool-choice :output output)))
     (unless (llm-response-items r)
       (setf (llm-response-items r) (%assistant-items-from-response r)))
     r))
 
 (defmethod stream-respond ((backend llm-backend) items &key model settings tools
-                           tool-choice on-part)
+                           tool-choice on-part output)
   (let ((r (stream-generate backend (items->turns items)
                             :model model :settings settings
-                            :tools tools :tool-choice tool-choice :on-part on-part)))
+                            :tools tools :tool-choice tool-choice
+                            :on-part on-part :output output)))
     (unless (llm-response-items r)
       (setf (llm-response-items r) (%assistant-items-from-response r)))
     r))

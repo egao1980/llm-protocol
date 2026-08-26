@@ -1,13 +1,16 @@
 (defpackage #:llm-protocol
   (:use #:cl)
   (:nicknames #:stack-llm)
-  (:export #:llm-error
+  (:export            #:llm-error
            #:llm-error-message
            #:llm-missing-backend
            #:llm-unsupported
            #:llm-http-error
            #:llm-http-error-status
            #:llm-http-error-body
+           #:llm-output-error
+           #:llm-output-error-response
+           #:llm-output-error-cause
 
            #:llm-backend
            #:llm-backend-p
@@ -67,6 +70,7 @@
            #:llm-settings-stop
            #:llm-settings-top-p
            #:llm-settings-response-format
+           #:llm-settings-output
            #:llm-settings-extra
            #:coerce-settings
 
@@ -122,9 +126,13 @@
            #:llm-response-model
            #:llm-response-finish-reason
            #:llm-response-usage
+           #:llm-response-content
            #:llm-response-text
            #:llm-response-thinking
            #:llm-response-tool-calls
+           #:llm-response-output
+           #:parse-structured-output
+           #:structured-output-json-schema
 
            #:llm-model-info
            #:make-llm-model-info

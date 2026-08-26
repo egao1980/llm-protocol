@@ -20,3 +20,10 @@
              (format s "llm HTTP error~@[ ~a~]~@[: ~a~]"
                      (llm-http-error-status c)
                      (or (llm-error-message c) (llm-http-error-body c))))))
+
+(define-condition llm-output-error (llm-error)
+  ((response :initarg :response :accessor llm-output-error-response :initform nil)
+   (cause :initarg :cause :reader llm-output-error-cause :initform nil))
+  (:report (lambda (c s)
+             (format s "llm structured output error~@[: ~a~]"
+                     (llm-error-message c)))))
