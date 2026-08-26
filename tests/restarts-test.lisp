@@ -27,9 +27,10 @@
                             (llm-protocol:make-llm-response
                              :parts (list (llm-protocol:make-llm-text-part :text "ok"))
                              :model "mock"))))))
-    (ok (equal "ok" (llm-protocol:llm-response-text
-                     (llm-protocol:with-auto-retry
-                       (llm-protocol:generate b "hi")))))
+    (let ((text (llm-protocol:llm-response-text
+                 (llm-protocol:with-auto-retry
+                   (llm-protocol:generate b "hi")))))
+      (ok (equal "ok" text)))
     (ok (= 2 n))))
 
 (deftest generate-use-value-substitutes
@@ -38,16 +39,16 @@
                        (declare (ignore backend turns))
                        (error 'llm-protocol:llm-http-error
                               :status 500 :message "boom" :retryable-p t)))))
-    (ok (equal "supplied"
-               (llm-protocol:llm-response-text
-                (handler-bind ((llm-protocol:llm-http-error
-                                (lambda (c)
-                                  (llm-protocol:invoke-use-value
-                                   (llm-protocol:make-llm-response
-                                    :parts (list (llm-protocol:make-llm-text-part
-                                                  :text "supplied")))
-                                   c))))
-                  (llm-protocol:generate b "hi")))))))
+    (let ((text (llm-protocol:llm-response-text
+                 (handler-bind ((llm-protocol:llm-http-error
+                                 (lambda (c)
+                                   (use-value
+                                    (llm-protocol:make-llm-response
+                                     :parts (list (llm-protocol:make-llm-text-part
+                                                   :text "supplied")))
+                                    c))))
+                   (llm-protocol:generate b "hi")))))
+      (ok (equal "supplied" text)))))
 
 (deftest generate-non-retryable-does-not-auto-retry
   (let* ((n 0)
@@ -82,6 +83,6 @@
                         :model "mock")))))
     (let ((r (handler-bind ((llm-protocol:llm-output-error
                              (lambda (c)
-                               (llm-protocol:invoke-use-value :patched c))))
+                               (use-value :patched c))))
                (llm-protocol:generate b "city" :output '%llm-city))))
       (ok (eq :patched (llm-protocol:llm-response-output r))))))
