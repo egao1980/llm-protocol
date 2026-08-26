@@ -45,7 +45,9 @@
   (and (integerp status)
        (or (= status 408) (= status 409) (= status 429) (>= status 500))))
 
-(defmethod initialize-instance :after ((c llm-http-error) &key (retryable-p nil retryable-supplied-p))
+(defmethod initialize-instance :after ((c llm-http-error)
+                                       &key (retryable-p nil retryable-supplied-p))
+  (declare (ignore retryable-p))
   (unless retryable-supplied-p
     (setf (slot-value c 'retryable-p)
           (http-status-retryable-p (llm-http-error-status c)))))
