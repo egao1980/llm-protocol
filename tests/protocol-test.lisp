@@ -58,6 +58,7 @@
   (let ((b (llm-protocol:make-mock-llm-backend)))
     (ok (llm-protocol:backend-supports-p b :tools))
     (ok (llm-protocol:backend-supports-p b :stream))
+    (ok (llm-protocol:backend-supports-p b :responses))
     (ng (llm-protocol:backend-supports-p b :vision))))
 
 (deftest mock-stream-generate
@@ -86,3 +87,44 @@
        (llm-protocol:coerce-settings '(:temperature 0 :max-tokens 16))))
   (ok (zerop (llm-protocol:llm-settings-temperature
               (llm-protocol:coerce-settings '(:temperature 0))))))
+
+(deftest items-roundtrip
+  (let* ((turns (list (llm-protocol:system-turn "be brief")
+                      (llm-protocol:user-turn "ping")
+                      (llm-protocol:assistant-turn "pong"
+                       :tool-calls (list (llm-protocol:make-llm-tool-call-part
+                                          :id "c1" :name "sum" :arguments "{}"))
+                       :thinking "hmm")
+                      (llm-protocol:tool-turn "c1" "3" :name "sum")))
+         (items (llm-protocol:turns->items turns))
+         (back (llm-protocol:items->turns items)))
+    (ok (llm-protocol:llm-message-item-p (first items)))
+    (ok (eq :system (llm-protocol:llm-message-item-role (first items))))
+    (ok (find-if #'llm-protocol:llm-reasoning-item-p items))
+    (ok (find-if #'llm-protocol:llm-function-call-item-p items))
+    (ok (find-if #'llm-protocol:llm-function-call-output-item-p items))
+    (ok (equal "ping" (llm-protocol:turn-text (second back))))
+    (ok (eq :assistant (llm-protocol:llm-turn-role (third back))))
+    (ok (find-if #'llm-protocol:llm-thinking-part-p
+                 (llm-protocol:llm-turn-parts (third back))))
+    (ok (eq :tool (llm-protocol:llm-turn-role (fourth back))))))
+
+(deftest reasoning-item-lmstudio-content
+  (let* ((part (make-hash-table :test 'equal))
+         (item (make-hash-table :test 'equal)))
+    (setf (gethash "type" part) "reasoning_text"
+          (gethash "text" part) "scratch")
+    (setf (gethash "type" item) "reasoning"
+          (gethash "summary" item) #()
+          (gethash "content" item) (vector part))
+    (let ((it (llm-protocol:coerce-item item)))
+      (ok (llm-protocol:llm-reasoning-item-p it))
+      (ok (equal "scratch" (llm-protocol:llm-reasoning-item-text it))))))
+
+(deftest mock-respond
+  (let* ((b (llm-protocol:make-mock-llm-backend))
+         (r (llm-protocol:respond b "hi")))
+    (ok (equal "echo: hi" (llm-protocol:llm-response-text r)))
+    (ok (llm-protocol:llm-message-item-p (first (llm-protocol:llm-response-items r))))
+    (ok (eq :assistant (llm-protocol:llm-message-item-role
+                        (first (llm-protocol:llm-response-items r)))))))

@@ -1,7 +1,7 @@
 (in-package #:llm-protocol)
 
 (defclass llm-backend () ()
-  (:documentation "Provider. Concrete backends live in llm-backend-*."))
+  (:documentation "Provider. Concrete backends live in llm-protocol-* repos."))
 
 (defun llm-backend-p (x)
   (typep x 'llm-backend))
@@ -219,6 +219,172 @@ A string is one user turn. A single turn / plist / hash-table is one-element."
       (when (eq (llm-turn-role turn) :user)
         (setf text (turn-text turn))))))
 
+(defun %seq-blocks (x)
+  (let ((list (%as-list x)))
+    (and list (plusp (length list)) list)))
+
+(defun %block-text (b)
+  (if (hash-table-p b)
+      (or (gethash "text" b) (gethash "summary_text" b) "")
+      b))
+
+(defun %reasoning-text (obj)
+  "OpenAI summary_text and LM Studio reasoning_text (empty summary is absent)."
+  (unless (hash-table-p obj)
+    (return-from %reasoning-text (%content-text obj)))
+  (let ((summary (%seq-blocks (gethash "summary" obj)))
+        (content (%seq-blocks (gethash "content" obj))))
+    (cond
+      (summary (%content-text (mapcar #'%block-text summary)))
+      (content (%content-text (mapcar #'%block-text content)))
+      (t (%content-text (or (gethash "text" obj) (gethash "thinking" obj) obj))))))
+
+(declaim (ftype (function (t) list) turn->items))
+
+(defgeneric coerce-item (object)
+  (:documentation "Normalize OBJECT to one LLM-ITEM. A turn that splits into several
+items is an error — use COERCE-ITEMS.")
+  (:method ((object llm-item))
+    object)
+  (:method ((object string))
+    (make-llm-message-item :role :user :parts (list (make-llm-text-part :text object))))
+  (:method ((object hash-table))
+    (let ((type (%keywordize (or (gethash "type" object) "message"))))
+      (case type
+        ((:message)
+         (make-llm-message-item
+          :id (gethash "id" object)
+          :role (%role (or (gethash "role" object) :user))
+          :parts (mapcar #'%coerce-part
+                         (%as-list (or (gethash "content" object)
+                                       (gethash "parts" object))))))
+        ((:function-call :tool-call)
+         (make-llm-function-call-item
+          :id (gethash "id" object)
+          :call-id (or (gethash "call_id" object) (gethash "callId" object)
+                       (gethash "id" object))
+          :name (gethash "name" object)
+          :arguments (or (gethash "arguments" object) "{}")))
+        ((:function-call-output :tool-result)
+         (make-llm-function-call-output-item
+          :id (gethash "id" object)
+          :call-id (or (gethash "call_id" object) (gethash "callId" object)
+                       (gethash "tool_call_id" object) (gethash "id" object))
+          :output (%content-text (or (gethash "output" object)
+                                     (gethash "content" object)))))
+        ((:reasoning :thinking)
+         (make-llm-reasoning-item
+          :id (gethash "id" object)
+          :text (%reasoning-text object)
+          :signature (gethash "signature" object)))
+        (t (let ((items (turn->items (coerce-turn object))))
+             (if (and items (null (rest items)))
+                 (first items)
+                 (error 'llm-error
+                        :message (format nil "not a single item: ~s" object))))))))
+  (:method ((object cons))
+    (if (keywordp (car object))
+        (coerce-item (let ((h (make-hash-table :test 'equal)))
+                       (loop for (k v) on object by #'cddr
+                             do (setf (gethash (string-downcase (symbol-name k)) h) v))
+                       h))
+        (error 'llm-error :message (format nil "not an item: ~s" object))))
+  (:method ((object llm-turn))
+    (let ((items (turn->items object)))
+      (if (and items (null (rest items)))
+          (first items)
+          (error 'llm-error
+                 :message "turn expanded to multiple items — use COERCE-ITEMS"))))
+  (:method ((object t))
+    (error 'llm-error :message (format nil "not an item: ~s" object))))
+
+(defun turn->items (turn)
+  (let* ((turn (if (llm-turn-p turn) turn (coerce-turn turn)))
+         (role (llm-turn-role turn)))
+    (if (eq role :tool)
+        (or (mapcar (lambda (p)
+                      (make-llm-function-call-output-item
+                       :call-id (llm-tool-result-part-id p)
+                       :output (or (llm-tool-result-part-content p) "")))
+                    (remove-if-not #'llm-tool-result-part-p (llm-turn-parts turn)))
+            (list (make-llm-function-call-output-item
+                   :call-id nil :output (turn-text turn))))
+        (let ((msg-parts nil)
+              (extra nil))
+          (dolist (p (llm-turn-parts turn))
+            (cond
+              ((llm-thinking-part-p p)
+               (push (make-llm-reasoning-item :text (or (llm-thinking-part-text p) "")
+                                              :signature (llm-thinking-part-signature p))
+                     extra))
+              ((llm-tool-call-part-p p)
+               (push (make-llm-function-call-item
+                      :id (llm-tool-call-part-id p)
+                      :call-id (llm-tool-call-part-id p)
+                      :name (llm-tool-call-part-name p)
+                      :arguments (llm-tool-call-part-arguments p))
+                     extra))
+              (t (push p msg-parts))))
+          (append (and msg-parts
+                       (list (make-llm-message-item :role role
+                                                    :parts (nreverse msg-parts))))
+                  (nreverse extra))))))
+
+(defun coerce-items (object)
+  "Normalize OBJECT to a list of LLM-ITEM. A string is one user message item."
+  (cond
+    ((null object) nil)
+    ((or (stringp object) (llm-item-p object) (llm-turn-p object)
+         (hash-table-p object)
+         (and (consp object) (keywordp (car object))))
+     (if (llm-turn-p object)
+         (turn->items object)
+         (list (coerce-item object))))
+    (t (mapcan #'coerce-items (%as-list object)))))
+
+(defun turns->items (turns)
+  (mapcan #'turn->items (coerce-turns turns)))
+
+(defun items->turns (items)
+  "Regroup Responses items into chat turns (mock / generate fallback)."
+  (let ((turns nil)
+        (pending nil))
+    (labels ((flush ()
+               (when pending
+                 (push (make-llm-turn :role :assistant :parts (nreverse pending)) turns)
+                 (setf pending nil))))
+      (dolist (it (coerce-items items) (progn (flush) (nreverse turns)))
+        (etypecase it
+          (llm-message-item
+           (if (eq (llm-message-item-role it) :assistant)
+               (dolist (p (reverse (copy-list (llm-message-item-parts it))))
+                 (push p pending))
+               (progn
+                 (flush)
+                 (push (make-llm-turn :role (llm-message-item-role it)
+                                      :parts (copy-list (llm-message-item-parts it)))
+                       turns))))
+          (llm-function-call-item
+           (push (make-llm-tool-call-part
+                  :id (or (llm-function-call-item-call-id it) (llm-item-id it))
+                  :name (llm-function-call-item-name it)
+                  :arguments (or (llm-function-call-item-arguments it) "{}"))
+                 pending))
+          (llm-reasoning-item
+           (push (make-llm-thinking-part :text (or (llm-reasoning-item-text it) "")
+                                         :signature (llm-reasoning-item-signature it))
+                 pending))
+          (llm-function-call-output-item
+           (flush)
+           (push (tool-turn (llm-function-call-output-item-call-id it)
+                            (or (llm-function-call-output-item-output it) ""))
+                 turns)))))))
+
+(defun %assistant-items-from-response (response)
+  (turns->items (list (make-llm-turn :role :assistant
+                                     :parts (copy-list (llm-response-parts response))))))
+
+
 (defun coerce-settings (object)
   (etypecase object
     (null nil)
@@ -256,6 +422,13 @@ TOOLS are descriptors (LLM-TOOL), not executors. SETTINGS is LLM-SETTINGS or a p
   (:documentation "Streaming sibling of GENERATE. ON-PART is called with each LLM-PART.
 Default method signals LLM-UNSUPPORTED. → LLM-RESPONSE when the stream ends."))
 
+(defgeneric respond (backend items &key model settings tools tool-choice)
+  (:documentation "Responses-style one-shot. ITEMS: string, LLM-ITEM, LLM-TURN, or a
+sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS + PARTS)."))
+
+(defgeneric stream-respond (backend items &key model settings tools tool-choice on-part)
+  (:documentation "Streaming sibling of RESPOND. Default: STREAM-GENERATE after ITEMS->TURNS."))
+
 (defgeneric list-models (backend &key)
   (:documentation "→ list of LLM-MODEL-INFO."))
 
@@ -267,6 +440,15 @@ Default method signals LLM-UNSUPPORTED. → LLM-RESPONSE when the stream ends.")
                             tool-choice on-part)
   (stream-generate (%ensure-backend) turns :model model :settings settings
                    :tools tools :tool-choice tool-choice :on-part on-part))
+
+(defmethod respond ((backend null) items &key model settings tools tool-choice)
+  (respond (%ensure-backend) items :model model :settings settings
+           :tools tools :tool-choice tool-choice))
+
+(defmethod stream-respond ((backend null) items &key model settings tools
+                           tool-choice on-part)
+  (stream-respond (%ensure-backend) items :model model :settings settings
+                  :tools tools :tool-choice tool-choice :on-part on-part))
 
 (defmethod list-models ((backend null) &key)
   (list-models (%ensure-backend)))
@@ -281,6 +463,23 @@ Default method signals LLM-UNSUPPORTED. → LLM-RESPONSE when the stream ends.")
   (declare (ignore turns model settings tools tool-choice on-part))
   (error 'llm-unsupported
          :message (format nil "~a does not implement stream-generate" (class-of backend))))
+
+(defmethod respond ((backend llm-backend) items &key model settings tools tool-choice)
+  (let ((r (generate backend (items->turns items)
+                     :model model :settings settings
+                     :tools tools :tool-choice tool-choice)))
+    (unless (llm-response-items r)
+      (setf (llm-response-items r) (%assistant-items-from-response r)))
+    r))
+
+(defmethod stream-respond ((backend llm-backend) items &key model settings tools
+                           tool-choice on-part)
+  (let ((r (stream-generate backend (items->turns items)
+                            :model model :settings settings
+                            :tools tools :tool-choice tool-choice :on-part on-part)))
+    (unless (llm-response-items r)
+      (setf (llm-response-items r) (%assistant-items-from-response r)))
+    r))
 
 (defmethod list-models ((backend llm-backend) &key)
   (error 'llm-unsupported
