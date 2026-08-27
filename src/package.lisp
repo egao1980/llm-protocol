@@ -1,0 +1,175 @@
+(defpackage #:llm-protocol
+  (:use #:cl)
+  (:nicknames #:stack-llm)
+  (:export #:llm-error
+           #:llm-error-message
+           #:llm-missing-backend
+           #:llm-unsupported
+           #:llm-http-error
+           #:llm-http-error-status
+           #:llm-http-error-body
+           #:llm-http-error-retryable-p
+           #:http-status-retryable-p
+           #:llm-output-error
+           #:llm-output-error-response
+           #:llm-output-error-cause
+           #:call-with-llm-restarts
+           #:with-llm-restarts
+           #:invoke-retry
+           #:invoke-use-value
+           #:invoke-ignore-output
+           #:auto-retry
+           #:auto-ignore-output
+           #:with-auto-retry
+           #:with-auto-ignore-output
+
+           #:llm-backend
+           #:llm-backend-p
+           #:*llm-backend*
+           #:backend-model
+           #:backend-supports-p
+
+           #:llm-part
+           #:llm-part-p
+           #:llm-text-part
+           #:make-llm-text-part
+           #:llm-text-part-p
+           #:llm-text-part-text
+           #:llm-image-part
+           #:make-llm-image-part
+           #:llm-image-part-p
+           #:llm-image-part-url
+           #:llm-image-part-media-type
+           #:llm-image-part-data
+           #:llm-tool-call-part
+           #:make-llm-tool-call-part
+           #:llm-tool-call-part-p
+           #:llm-tool-call-part-id
+           #:llm-tool-call-part-name
+           #:llm-tool-call-part-arguments
+           #:llm-tool-result-part
+           #:make-llm-tool-result-part
+           #:llm-tool-result-part-p
+           #:llm-tool-result-part-id
+           #:llm-tool-result-part-name
+           #:llm-tool-result-part-content
+           #:llm-tool-result-part-error-p
+           #:llm-thinking-part
+           #:make-llm-thinking-part
+           #:llm-thinking-part-p
+           #:llm-thinking-part-text
+           #:llm-thinking-part-signature
+
+           #:llm-turn
+           #:make-llm-turn
+           #:llm-turn-p
+           #:llm-turn-role
+           #:llm-turn-parts
+           #:user-turn
+           #:system-turn
+           #:assistant-turn
+           #:tool-turn
+           #:coerce-turn
+           #:coerce-turns
+           #:turn-text
+
+           #:llm-settings
+           #:make-llm-settings
+           #:llm-settings-p
+           #:llm-settings-temperature
+           #:llm-settings-max-tokens
+           #:llm-settings-stop
+           #:llm-settings-top-p
+           #:llm-settings-response-format
+           #:llm-settings-output
+           #:llm-settings-extra
+           #:coerce-settings
+
+           #:llm-tool
+           #:make-llm-tool
+           #:llm-tool-p
+           #:llm-tool-name
+           #:llm-tool-description
+           #:llm-tool-parameters
+
+           #:llm-usage
+           #:make-llm-usage
+           #:llm-usage-p
+           #:llm-usage-input-tokens
+           #:llm-usage-output-tokens
+           #:llm-usage-total-tokens
+
+           #:llm-item
+           #:llm-item-p
+           #:llm-item-id
+           #:llm-message-item
+           #:make-llm-message-item
+           #:llm-message-item-p
+           #:llm-message-item-role
+           #:llm-message-item-parts
+           #:llm-function-call-item
+           #:make-llm-function-call-item
+           #:llm-function-call-item-p
+           #:llm-function-call-item-call-id
+           #:llm-function-call-item-name
+           #:llm-function-call-item-arguments
+           #:llm-function-call-output-item
+           #:make-llm-function-call-output-item
+           #:llm-function-call-output-item-p
+           #:llm-function-call-output-item-call-id
+           #:llm-function-call-output-item-output
+           #:llm-reasoning-item
+           #:make-llm-reasoning-item
+           #:llm-reasoning-item-p
+           #:llm-reasoning-item-text
+           #:llm-reasoning-item-signature
+           #:coerce-item
+           #:coerce-items
+           #:items->turns
+           #:turns->items
+
+           #:llm-response
+           #:make-llm-response
+           #:llm-response-p
+           #:llm-response-parts
+           #:llm-response-items
+           #:llm-response-id
+           #:llm-response-model
+           #:llm-response-finish-reason
+           #:llm-response-usage
+           #:llm-response-content
+           #:llm-response-text
+           #:llm-response-thinking
+           #:llm-response-tool-calls
+           #:llm-response-output
+           #:parse-structured-output
+           #:structured-output-json-schema
+           #:try-parse-json-output
+
+           #:llm-model-info
+           #:make-llm-model-info
+           #:llm-model-info-p
+           #:llm-model-info-id
+           #:llm-model-info-owned-by
+
+           #:generate
+           #:stream-generate
+           #:respond
+           #:stream-respond
+           #:list-models
+
+           #:mock-llm-backend
+           #:make-mock-llm-backend
+           #:use-mock-llm-backend
+           #:mock-llm-prefix
+           #:mock-llm-handler
+           #:mock-llm-models
+           #:mock-llm-tool-calls
+
+           #:llm-generation-adapter
+           #:llm-generation-backend
+           #:make-llm-generation-adapter
+           #:make-llm-catalogue
+           #:register-llm-backend))
+
+(in-package #:llm-protocol)
