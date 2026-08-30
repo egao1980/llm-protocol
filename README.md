@@ -6,9 +6,9 @@ CLOS **turns + typed parts** for [cl-stack](https://github.com/egao1980/cl-stack
 
 | System | Role |
 |--------|------|
-| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, mock |
-| [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` |
-| `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` |
+| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, `embed`, mock |
+| [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` + `/embeddings` |
+| `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` + `embed` |
 | `llm-protocol/schema` | `schema-protocol` + `schema-protocol-json` → `llm-response-output` |
 
 MCP sampling (`create-message` → `generate`) is [`ai-agent-protocol/mcp`](https://github.com/egao1980/ai-agent-protocol) — **not** here.
@@ -40,7 +40,15 @@ Lookup **what a backend can do** is `capability-protocol`, not a second flag obj
 (let ((cat (stack-llm:make-llm-catalogue (stack-llm:make-mock-llm-backend))))
   (stack-capability:capability-supported-p cat :llm-tools)      ; T
   (stack-capability:capability-supported-p cat :llm-responses)  ; T (mock)
-  (stack-capability:capability-supported-p cat :llm-vision))    ; NIL
+  (stack-capability:capability-supported-p cat :llm-vision)     ; NIL
+  (stack-capability:capability-supported-p cat :llm-embeddings)) ; T (mock)
+```
+
+`embed` takes a string or sequence of strings → `llm-embed-result`. `embed-query` returns the first float vector.
+
+```lisp
+(let ((b (stack-llm:make-mock-llm-backend)))
+  (stack-llm:embed-query b "hi" :dimensions 8))
 ```
 
 Structured output is `schema-protocol` (`defschema`) + `schema-protocol-json` (JSON Schema emit). Not a PydanticAI `Agent`:

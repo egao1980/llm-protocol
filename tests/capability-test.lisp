@@ -20,6 +20,7 @@
     (ok (capability-protocol:capability-supported-p cat :llm-generation))
     (ok (capability-protocol:capability-supported-p cat :llm-tools))
     (ok (capability-protocol:capability-supported-p cat :llm-responses))
+    (ok (capability-protocol:capability-supported-p cat :llm-embeddings))
     (ng (capability-protocol:capability-supported-p cat :llm-vision))
     (ok (capability-protocol:catalogue-defines-p cat :llm-vision))
     (let ((gen (capability-protocol:get-capability cat :llm-generation)))
@@ -29,6 +30,9 @@
       (ok (equal "echo: hi"
                  (llm-protocol:llm-response-text
                   (capability-protocol:stream-complete gen "hi")))))
+    (let ((emb (capability-protocol:get-capability cat :llm-embeddings)))
+      (ok (llm-protocol:llm-embed-result-p
+           (capability-protocol:embed emb "hi"))))
     (let ((bb (blackboard-protocol:make-blackboard)))
       (llm-protocol:register-llm-backend bb backend)
       (ok (capability-protocol:capability-supported-p bb :llm-tools))

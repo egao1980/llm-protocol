@@ -226,3 +226,25 @@
 
 (defun llm-model-info-p (x)
   (typep x 'llm-model-info))
+
+(defclass llm-embedding ()
+  ((vector :initarg :vector :accessor llm-embedding-vector :initform #())
+   (index :initarg :index :accessor llm-embedding-index :initform 0)))
+
+(defun make-llm-embedding (&key vector (index 0))
+  (make-instance 'llm-embedding :vector (or vector #()) :index index))
+
+(defun llm-embedding-p (x)
+  (typep x 'llm-embedding))
+
+(defclass llm-embed-result ()
+  ((embeddings :initarg :embeddings :accessor llm-embed-result-embeddings :initform nil)
+   (model :initarg :model :accessor llm-embed-result-model :initform nil)
+   (usage :initarg :usage :accessor llm-embed-result-usage :initform nil)))
+
+(defun make-llm-embed-result (&key embeddings model usage)
+  (make-instance 'llm-embed-result :embeddings (copy-list embeddings)
+                 :model model :usage usage))
+
+(defun llm-embed-result-p (x)
+  (typep x 'llm-embed-result))

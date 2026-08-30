@@ -5,6 +5,8 @@
     (ok (signals (llm-protocol:generate nil "hi")
                  'llm-protocol:llm-missing-backend))
     (ok (signals (llm-protocol:list-models nil)
+                 'llm-protocol:llm-missing-backend))
+    (ok (signals (llm-protocol:embed nil "hi")
                  'llm-protocol:llm-missing-backend))))
 
 (deftest coerce-turns-shapes
@@ -59,7 +61,35 @@
     (ok (llm-protocol:backend-supports-p b :tools))
     (ok (llm-protocol:backend-supports-p b :stream))
     (ok (llm-protocol:backend-supports-p b :responses))
+    (ok (llm-protocol:backend-supports-p b :embeddings))
     (ng (llm-protocol:backend-supports-p b :vision))))
+
+(deftest mock-embed
+  (let* ((b (llm-protocol:make-mock-llm-backend))
+         (r (llm-protocol:embed b "ab" :dimensions 4)))
+    (ok (llm-protocol:llm-embed-result-p r))
+    (ok (equal "mock" (llm-protocol:llm-embed-result-model r)))
+    (let ((v (llm-protocol:llm-embedding-vector
+              (first (llm-protocol:llm-embed-result-embeddings r)))))
+      (ok (= 4 (length v)))
+      (ok (= (float (char-code #\a) 1f0) (aref v 0)))
+      (ok (= (float (char-code #\b) 1f0) (aref v 1)))
+      (ok (zerop (aref v 2)))))
+  (let* ((r (llm-protocol:embed (llm-protocol:make-mock-llm-backend)
+                                '("x" "y") :model "e"))
+         (embs (llm-protocol:llm-embed-result-embeddings r)))
+    (ok (= 2 (length embs)))
+    (ok (zerop (llm-protocol:llm-embedding-index (first embs))))
+    (ok (= 1 (llm-protocol:llm-embedding-index (second embs))))
+    (ok (equal "e" (llm-protocol:llm-embed-result-model r))))
+  (let ((v (llm-protocol:embed-query (llm-protocol:make-mock-llm-backend) "z"
+                                     :dimensions 2)))
+    (ok (= 2 (length v)))
+    (ok (= (float (char-code #\z) 1f0) (aref v 0)))))
+
+(deftest default-embed-unsupported
+  (ok (signals (llm-protocol:embed (make-instance 'llm-protocol:llm-backend) "hi")
+               'llm-protocol:llm-unsupported)))
 
 (deftest mock-stream-generate
   (let* ((seen nil)
