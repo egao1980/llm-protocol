@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.1.0"
+  :version "0.2.0"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
@@ -17,8 +17,8 @@
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
 (defsystem "llm-protocol/capability"
-  :version "0.1.0"
-  :description "capability-protocol :llm-generation adapter over llm-protocol"
+  :version "0.2.0"
+  :description "capability-protocol :llm-generation / :llm-embeddings adapters over llm-protocol"
   :author "egao1980"
   :license "MIT"
   :depends-on ("llm-protocol" "capability-protocol")

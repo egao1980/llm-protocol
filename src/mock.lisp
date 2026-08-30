@@ -37,6 +37,33 @@
 (defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :responses)))
   t)
 
+(defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :embeddings)))
+  t)
+
+(defun %mock-embedding-vector (text dimensions)
+  (let* ((n (or dimensions 8))
+         (v (make-array n :element-type 'single-float :initial-element 0f0)))
+    (loop for i from 0 below (min n (length text))
+          do (setf (aref v i) (float (mod (char-code (char text i)) 256) 1f0)))
+    v))
+
+(defmethod embed ((backend mock-llm-backend) inputs &key model dimensions
+                  encoding-format)
+  (when (and encoding-format
+             (not (member encoding-format '(:float "float") :test #'equal)))
+    (error 'llm-unsupported
+           :message (format nil "mock embed is float-only, got ~s" encoding-format)))
+  (let ((texts (coerce-embed-inputs inputs)))
+    (make-llm-embed-result
+     :embeddings (loop for text in texts for i from 0
+                       collect (make-llm-embedding
+                                :vector (%mock-embedding-vector text dimensions)
+                                :index i))
+     :model (or model (mock-llm-default-model backend))
+     :usage (make-llm-usage
+             :input-tokens (reduce #'+ texts :key #'length :initial-value 0)
+             :total-tokens (reduce #'+ texts :key #'length :initial-value 0)))))
+
 (defmethod generate ((backend mock-llm-backend) turns &key model settings tools
                      tool-choice output)
   (declare (ignore output))

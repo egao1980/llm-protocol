@@ -28,6 +28,21 @@
         (remove 'capability-protocol:stream-complete ops
                 :key #'capability-protocol:capability-operation-name))))
 
+(defclass llm-embeddings-adapter (capability-protocol:llm-embeddings-capability)
+  ((backend :initarg :backend :accessor llm-embeddings-backend :initform nil))
+  (:documentation "Implements :llm-embeddings EMBED via LLM-PROTOCOL:EMBED."))
+
+(defun make-llm-embeddings-adapter (&key backend)
+  (make-instance 'llm-embeddings-adapter :backend backend))
+
+(defun %embed-backend (cap)
+  (or (llm-embeddings-backend cap) *llm-backend*))
+
+(defmethod capability-protocol:embed ((cap llm-embeddings-adapter) inputs
+                                      &key model dimensions encoding-format)
+  (embed (%embed-backend cap) inputs :model model
+         :dimensions dimensions :encoding-format encoding-format))
+
 (defparameter +llm-support-capabilities+
   '((:tools . capability-protocol:llm-tools-capability)
     (:vision . capability-protocol:llm-vision-capability)
@@ -45,6 +60,9 @@ Query with CAPABILITY-SUPPORTED-P / GET-CAPABILITY / LIST-CAPABILITIES."
   (let ((cat (capability-protocol:make-catalogue :llm)))
     (capability-protocol:register-capability
      cat (make-llm-generation-adapter :backend backend))
+    (when (backend-supports-p backend :embeddings)
+      (capability-protocol:register-capability
+       cat (make-llm-embeddings-adapter :backend backend)))
     (dolist (pair +llm-support-capabilities+)
       (when (backend-supports-p backend (car pair))
         (capability-protocol:register-capability

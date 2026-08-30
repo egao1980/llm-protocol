@@ -632,3 +632,41 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
 (defmethod list-models ((backend llm-backend) &key)
   (error 'llm-unsupported
          :message (format nil "~a does not implement list-models" (class-of backend))))
+
+(defun coerce-embed-inputs (inputs)
+  "INPUTS: a string or a sequence of strings. → list of strings."
+  (cond
+    ((stringp inputs) (list inputs))
+    ((or (listp inputs) (vectorp inputs))
+     (let ((xs (%as-list inputs)))
+       (unless (and xs (every #'stringp xs))
+         (error 'llm-error
+                :message (format nil "embed inputs must be strings: ~s" inputs)))
+       xs))
+    (t (error 'llm-error
+              :message (format nil "embed inputs must be a string or sequence of strings: ~s"
+                               inputs)))))
+
+(defgeneric embed (backend inputs &key model dimensions encoding-format)
+  (:documentation "Embed INPUTS (string or sequence of strings). → LLM-EMBED-RESULT.
+Default method signals LLM-UNSUPPORTED. DIMENSIONS is an optional output width.
+ENCODING-FORMAT is :float (wave-1); other values are backend-defined."))
+
+(defun embed-query (backend text &rest args &key &allow-other-keys)
+  "Sugar: first embedding vector from EMBED."
+  (check-type text string)
+  (let* ((r (apply #'embed backend text args))
+         (emb (and r (first (llm-embed-result-embeddings r)))))
+    (and emb (llm-embedding-vector emb))))
+
+(defmethod embed :around ((backend llm-backend) inputs &key &allow-other-keys)
+  (with-llm-restarts
+    (call-next-method)))
+
+(defmethod embed ((backend null) inputs &rest args &key &allow-other-keys)
+  (apply #'embed (%ensure-backend) inputs args))
+
+(defmethod embed ((backend llm-backend) inputs &key model dimensions encoding-format)
+  (declare (ignore inputs model dimensions encoding-format))
+  (error 'llm-unsupported
+         :message (format nil "~a does not implement embed" (class-of backend))))

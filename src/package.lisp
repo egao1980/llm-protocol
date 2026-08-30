@@ -152,11 +152,26 @@
            #:llm-model-info-id
            #:llm-model-info-owned-by
 
+           #:llm-embedding
+           #:make-llm-embedding
+           #:llm-embedding-p
+           #:llm-embedding-vector
+           #:llm-embedding-index
+           #:llm-embed-result
+           #:make-llm-embed-result
+           #:llm-embed-result-p
+           #:llm-embed-result-embeddings
+           #:llm-embed-result-model
+           #:llm-embed-result-usage
+           #:coerce-embed-inputs
+
            #:generate
            #:stream-generate
            #:respond
            #:stream-respond
            #:list-models
+           #:embed
+           #:embed-query
 
            #:mock-llm-backend
            #:make-mock-llm-backend
@@ -169,6 +184,9 @@
            #:llm-generation-adapter
            #:llm-generation-backend
            #:make-llm-generation-adapter
+           #:llm-embeddings-adapter
+           #:llm-embeddings-backend
+           #:make-llm-embeddings-adapter
            #:make-llm-catalogue
            #:register-llm-backend))
 
