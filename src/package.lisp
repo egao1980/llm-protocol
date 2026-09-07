@@ -5,6 +5,8 @@
            #:llm-error-message
            #:llm-missing-backend
            #:llm-unsupported
+           #:llm-unknown-provider
+           #:llm-unknown-provider-name
            #:llm-http-error
            #:llm-http-error-status
            #:llm-http-error-body
@@ -188,6 +190,25 @@
            #:llm-embeddings-backend
            #:make-llm-embeddings-adapter
            #:make-llm-catalogue
-           #:register-llm-backend))
+           #:register-llm-backend
+
+           #:llm-provider-catalog
+           #:llm-provider
+           #:make-llm-provider
+           #:llm-provider-p
+           #:llm-provider-name
+           #:llm-provider-backend
+           #:llm-provider-models
+           #:in-memory-provider-catalog
+           #:make-in-memory-provider-catalog
+           #:*llm-catalog*
+           #:register-provider
+           #:unregister-provider
+           #:find-provider
+           #:list-providers
+           #:resolve-backend
+           #:catalog-list-models
+           #:parse-provider-ref
+           #:use-in-memory-provider-catalog))
 
 (in-package #:llm-protocol)

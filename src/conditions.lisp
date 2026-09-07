@@ -23,6 +23,13 @@
   (:report (lambda (c s)
              (format s "llm unsupported~@[: ~a~]" (llm-error-message c)))))
 
+(define-condition llm-unknown-provider (llm-error)
+  ((name :initarg :name :reader llm-unknown-provider-name :initform nil))
+  (:report (lambda (c s)
+             (format s "llm unknown provider ~s~@[: ~a~]"
+                     (llm-unknown-provider-name c)
+                     (llm-error-message c)))))
+
 (defun http-status-retryable-p (status)
   "T for 408 / 409 / 429 / 5xx."
   (and (integerp status)

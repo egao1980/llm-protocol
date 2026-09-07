@@ -6,8 +6,9 @@ CLOS **turns + typed parts** for [cl-stack](https://github.com/egao1980/cl-stack
 
 | System | Role |
 |--------|------|
-| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, `embed`, mock |
+| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, `embed`, mock, provider catalog |
 | [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` + `/embeddings` |
+| [`llm-protocol-anthropic`](https://github.com/egao1980/llm-protocol-anthropic) (`stack-llm-anthropic`) | Messages API (official / vLLM / llama-server) |
 | `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` + `embed` |
 | `llm-protocol/schema` | `schema-protocol` + `schema-protocol-json` → `llm-response-output` |
 
@@ -32,6 +33,19 @@ Brief: [`llm.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabiliti
 ```
 
 Role on the **turn**; type on the **part**. Responses grain is `llm-item` (`llm-message-item`, `llm-function-call-item`, …). `turns->items` / `items->turns` convert. Tools are descriptors, not executors.
+
+**Provider catalog** (0.2.1) is name → `llm-backend`. Not LiteLLM. Not a router/budget. Not `make-llm-catalogue` (that is capability `:llm` ops).
+
+```lisp
+(let ((cat (stack-llm:make-in-memory-provider-catalog)))
+  (stack-llm:register-provider cat "mock" (stack-llm:make-mock-llm-backend))
+  (multiple-value-bind (b model)
+      (stack-llm:resolve-backend cat "mock")
+    (declare (ignore model))
+    (stack-llm:llm-response-text (stack-llm:generate b "hi"))))
+```
+
+Refs: `"anthropic:claude"` / `"anthropic"` / `:vllm` / `("openai" "gpt-4o")`. An `llm-backend` is identity. Missing name → `llm-unknown-provider` (`use-value`). Nil `*llm-catalog*` → `llm-missing-backend` (`use-value`).
 
 Lookup **what a backend can do** is `capability-protocol`, not a second flag object:
 
