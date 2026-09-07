@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.2.0"
+  :version "0.2.1"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
@@ -13,6 +13,7 @@
                (:file "conditions")
                (:file "types")
                (:file "protocol")
+               (:file "catalog")
                (:file "mock"))
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
@@ -48,6 +49,7 @@
   :serial t
   :components ((:file "package")
                (:file "protocol-test")
+               (:file "catalog-test")
                (:file "capability-test")
                (:file "schema-test")
                (:file "restarts-test"))
