@@ -1,6 +1,8 @@
 (in-package #:llm-protocol)
 
-;;; Provider catalog: name → llm-backend. Not a router/budget. Not LiteLLM.
+;;; Provider catalog: name → llm-backend. Not LiteLLM.
+;;; Model metadata (context-window, per-1M prices) lives on LLM-MODEL-INFO.
+;;; Routing / budget is llm-protocol/router.
 ;;; Refs: "anthropic:claude-sonnet" | "anthropic" | (:anthropic "claude-sonnet")
 
 (defclass llm-provider-catalog () ())
@@ -8,12 +10,15 @@
 (defclass llm-provider ()
   ((name :initarg :name :accessor llm-provider-name)
    (backend :initarg :backend :accessor llm-provider-backend)
-   (models :initarg :models :accessor llm-provider-models :initform nil)))
+   (models :initarg :models :accessor llm-provider-models :initform nil)
+   (context-window :initarg :context-window :accessor llm-provider-context-window
+                   :initform nil)))
 
-(defun make-llm-provider (&key name backend models)
+(defun make-llm-provider (&key name backend models context-window)
   (check-type name string)
   (make-instance 'llm-provider :name name :backend backend
-                 :models (copy-list models)))
+                 :models (copy-list models)
+                 :context-window context-window))
 
 (defun llm-provider-p (x)
   (typep x 'llm-provider))
@@ -71,8 +76,10 @@
     (t (error 'llm-error
               :message (format nil "not a provider ref: ~s" designator)))))
 
-(defgeneric register-provider (catalog name backend &key models)
-  (:documentation "Register BACKEND under NAME (string or symbol)."))
+(defgeneric register-provider (catalog name backend &key models context-window)
+  (:documentation "Register BACKEND under NAME (string or symbol).
+MODELS may be strings or LLM-MODEL-INFO (context-window / prices).
+CONTEXT-WINDOW is an optional provider-wide default."))
 
 (defgeneric unregister-provider (catalog name)
   (:documentation "Drop NAME. Missing → LLM-UNKNOWN-PROVIDER (CONTINUE skips)."))
@@ -91,14 +98,16 @@
   (:documentation "Union of registered models. PROVIDER limits to one name."))
 
 (defmethod register-provider ((catalog in-memory-provider-catalog) name backend
-                              &key models)
+                              &key models context-window)
   (let ((key (%provider-key name)))
     (setf (gethash key (in-memory-catalog-table catalog))
-          (make-llm-provider :name key :backend backend :models models))
+          (make-llm-provider :name key :backend backend :models models
+                             :context-window context-window))
     catalog))
 
-(defmethod register-provider ((catalog null) name backend &key models)
-  (register-provider (%ensure-catalog) name backend :models models))
+(defmethod register-provider ((catalog null) name backend &key models context-window)
+  (register-provider (%ensure-catalog) name backend :models models
+                     :context-window context-window))
 
 (defmethod unregister-provider ((catalog in-memory-provider-catalog) name)
   (let ((key (%provider-key name))

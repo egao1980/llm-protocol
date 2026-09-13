@@ -57,6 +57,26 @@
              (format s "llm structured output error~@[: ~a~]"
                      (llm-error-message c)))))
 
+(define-condition llm-budget-exceeded (llm-error)
+  ((budget :initarg :budget :reader llm-budget-exceeded-budget :initform nil)
+   (scope :initarg :scope :reader llm-budget-exceeded-scope :initform nil)
+   (used-tokens :initarg :used-tokens :reader llm-budget-exceeded-used-tokens
+                :initform 0)
+   (used-cost :initarg :used-cost :reader llm-budget-exceeded-used-cost
+              :initform 0)
+   (max-tokens :initarg :max-tokens :reader llm-budget-exceeded-max-tokens
+               :initform nil)
+   (max-cost :initarg :max-cost :reader llm-budget-exceeded-max-cost
+             :initform nil))
+  (:report (lambda (c s)
+             (format s "llm budget exceeded~@[ for scope ~s~] (tokens ~a~@[/~a~]~@[, cost ~a~@[/~a~]~])~@[: ~a~]"
+                     (llm-budget-exceeded-scope c)
+                     (llm-budget-exceeded-used-tokens c)
+                     (llm-budget-exceeded-max-tokens c)
+                     (llm-budget-exceeded-used-cost c)
+                     (llm-budget-exceeded-max-cost c)
+                     (llm-error-message c)))))
+
 ;;; --- restart helpers -------------------------------------------------------
 
 (defun %report (stream format-control &rest args)
@@ -99,6 +119,17 @@
 (defun invoke-ignore-output (&optional condition)
   (let ((r (find-restart 'ignore-output condition)))
     (when r (invoke-restart r))))
+
+(defun invoke-continue-anyway (&optional condition)
+  (let ((r (find-restart 'continue-anyway condition)))
+    (when r (invoke-restart r))))
+
+(defun invoke-use-cheaper-model (backend &optional model condition)
+  (let ((r (find-restart 'use-cheaper-model condition)))
+    (when r
+      (if model
+          (invoke-restart r backend model)
+          (invoke-restart r backend)))))
 
 (defun auto-retry (condition)
   "HANDLER-BIND: RETRY only when LLM-HTTP-ERROR-RETRYABLE-P.

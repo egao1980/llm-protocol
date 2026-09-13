@@ -20,10 +20,20 @@
            #:invoke-retry
            #:invoke-use-value
            #:invoke-ignore-output
+           #:invoke-continue-anyway
+           #:invoke-use-cheaper-model
            #:auto-retry
            #:auto-ignore-output
            #:with-auto-retry
            #:with-auto-ignore-output
+
+           #:llm-budget-exceeded
+           #:llm-budget-exceeded-budget
+           #:llm-budget-exceeded-scope
+           #:llm-budget-exceeded-used-tokens
+           #:llm-budget-exceeded-used-cost
+           #:llm-budget-exceeded-max-tokens
+           #:llm-budget-exceeded-max-cost
 
            #:llm-backend
            #:llm-backend-p
@@ -153,6 +163,9 @@
            #:llm-model-info-p
            #:llm-model-info-id
            #:llm-model-info-owned-by
+           #:llm-model-info-context-window
+           #:llm-model-info-input-price
+           #:llm-model-info-output-price
 
            #:llm-embedding
            #:make-llm-embedding
@@ -174,6 +187,14 @@
            #:list-models
            #:embed
            #:embed-query
+           #:count-tokens
+           #:context-window
+           #:fit-turns
+           #:token-fit-policy
+           #:make-token-fit-policy
+           #:token-fit-policy-p
+           #:token-fit-policy-max-tokens
+           #:token-fit-policy-reserve
 
            #:mock-llm-backend
            #:make-mock-llm-backend
@@ -199,6 +220,7 @@
            #:llm-provider-name
            #:llm-provider-backend
            #:llm-provider-models
+           #:llm-provider-context-window
            #:in-memory-provider-catalog
            #:make-in-memory-provider-catalog
            #:*llm-catalog*
@@ -209,6 +231,45 @@
            #:resolve-backend
            #:catalog-list-models
            #:parse-provider-ref
-           #:use-in-memory-provider-catalog))
+           #:use-in-memory-provider-catalog
+
+           #:routing-policy
+           #:select-backend
+           #:record-usage
+           #:record-latency
+           #:llm-route-request
+           #:make-llm-route-request
+           #:llm-route-request-p
+           #:route-request-operation
+           #:route-request-turns
+           #:route-request-model
+           #:route-request-settings
+           #:route-request-inputs
+           #:route-request-scope
+           #:fallback-chain-policy
+           #:make-fallback-chain-policy
+           #:fallback-chain-policy-p
+           #:fallback-candidates
+           #:llm-budget
+           #:make-llm-budget
+           #:llm-budget-p
+           #:llm-budget-max-tokens
+           #:llm-budget-max-cost
+           #:budget-policy
+           #:make-budget-policy
+           #:budget-policy-p
+           #:budget-policy-inner
+           #:budget-policy-budget
+           #:least-latency-policy
+           #:make-least-latency-policy
+           #:least-latency-policy-p
+           #:latency-policy-inner
+           #:latency-policy-alpha
+           #:llm-router-backend
+           #:make-llm-router-backend
+           #:llm-router-backend-p
+           #:llm-router-policy
+           #:llm-router-candidates
+           #:llm-router-scope))
 
 (in-package #:llm-protocol)

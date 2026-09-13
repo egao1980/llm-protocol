@@ -219,10 +219,20 @@
 
 (defclass llm-model-info ()
   ((id :initarg :id :accessor llm-model-info-id)
-   (owned-by :initarg :owned-by :accessor llm-model-info-owned-by :initform nil)))
+   (owned-by :initarg :owned-by :accessor llm-model-info-owned-by :initform nil)
+   (context-window :initarg :context-window :accessor llm-model-info-context-window
+                   :initform nil)
+   (input-price :initarg :input-price :accessor llm-model-info-input-price
+                :initform nil
+                :documentation "USD per 1M input tokens, or NIL.")
+   (output-price :initarg :output-price :accessor llm-model-info-output-price
+                 :initform nil
+                 :documentation "USD per 1M output tokens, or NIL.")))
 
-(defun make-llm-model-info (&key id owned-by)
-  (make-instance 'llm-model-info :id id :owned-by owned-by))
+(defun make-llm-model-info (&key id owned-by context-window input-price output-price)
+  (make-instance 'llm-model-info :id id :owned-by owned-by
+                 :context-window context-window
+                 :input-price input-price :output-price output-price))
 
 (defun llm-model-info-p (x)
   (typep x 'llm-model-info))
