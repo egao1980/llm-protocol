@@ -7,7 +7,8 @@
   :properties (:cl-repo
                (:ci (:with ("llm-protocol/capability"
                             "llm-protocol/schema"
-                            "llm-protocol/router"))))
+                            "llm-protocol/router"
+                            "llm-protocol/telemetry"))))
   :serial t
   :pathname "src"
   :components ((:file "package")
@@ -68,6 +69,7 @@
                "llm-protocol/capability"
                "llm-protocol/schema"
                "llm-protocol/router"
+               "llm-protocol/telemetry"
                "rove")
   :pathname "tests"
   :serial t
@@ -78,7 +80,8 @@
                (:file "schema-test")
                (:file "restarts-test")
                (:file "tokens-test")
-               (:file "router-test"))
+               (:file "router-test")
+               (:file "telemetry-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))
