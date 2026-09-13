@@ -71,22 +71,27 @@
     (if (mock-llm-handler backend)
         (funcall (mock-llm-handler backend) backend normalized
                  :model model :settings settings :tools tools :tool-choice tool-choice)
-        (let* ((text (last-user-text normalized))
+        (let* ((user-text (last-user-text normalized))
                (tcs (mapcar (lambda (tc)
                               (if (llm-tool-call-part-p tc)
                                   tc
                                   (%coerce-tool-call-part tc)))
                             (%as-list (mock-llm-tool-calls backend))))
+               (out-text (if tcs
+                             ""
+                             (concatenate 'string (mock-llm-prefix backend)
+                                          user-text)))
                (parts (if tcs
                           tcs
-                          (list (make-llm-text-part
-                                 :text (concatenate 'string
-                                                    (mock-llm-prefix backend)
-                                                    text))))))
+                          (list (make-llm-text-part :text out-text))))
+               (in (count-tokens backend normalized))
+               (out (count-tokens backend out-text)))
           (make-llm-response
            :parts parts
            :model (or model (mock-llm-default-model backend))
-           :finish-reason (if tcs :tool-use :stop))))))
+           :finish-reason (if tcs :tool-use :stop)
+           :usage (make-llm-usage :input-tokens in :output-tokens out
+                                  :total-tokens (+ in out)))))))
 
 (defmethod stream-generate ((backend mock-llm-backend) turns &key model settings
                             tools tool-choice on-part output)

@@ -670,3 +670,163 @@ ENCODING-FORMAT is :float (wave-1); other values are backend-defined."))
   (declare (ignore inputs model dimensions encoding-format))
   (error 'llm-unsupported
          :message (format nil "~a does not implement embed" (class-of backend))))
+
+;;; --- tokens / context -------------------------------------------------------
+
+(defclass token-fit-policy ()
+  ((max-tokens :initarg :max-tokens :accessor token-fit-policy-max-tokens
+               :initform nil)
+   (reserve :initarg :reserve :accessor token-fit-policy-reserve :initform 0))
+  (:documentation "Budget for FIT-TURNS. MAX-TOKENS overrides CONTEXT-WINDOW.
+RESERVE tokens are subtracted from the window/budget (completion headroom)."))
+
+(defun make-token-fit-policy (&key max-tokens (reserve 0))
+  (make-instance 'token-fit-policy :max-tokens max-tokens :reserve reserve))
+
+(defun token-fit-policy-p (x)
+  (typep x 'token-fit-policy))
+
+(defun %model-id (model)
+  (cond
+    ((null model) nil)
+    ((llm-model-info-p model) (llm-model-info-id model))
+    ((stringp model) model)
+    ((symbolp model) (string-downcase (symbol-name model)))
+    (t (princ-to-string model))))
+
+(defun %provider-for-backend (catalog backend)
+  (when catalog
+    (find backend (ignore-errors (list-providers catalog))
+          :key #'llm-provider-backend :test #'eq)))
+
+(defun %lookup-model-info (backend model)
+  "→ LLM-MODEL-INFO or NIL. MODEL may be a string, id, or LLM-MODEL-INFO."
+  (when (llm-model-info-p model)
+    (return-from %lookup-model-info model))
+  (let ((id (%model-id (or model (ignore-errors (backend-model backend))))))
+    (or (when id
+          (find-if (lambda (m)
+                     (and (llm-model-info-p m)
+                          (equal (llm-model-info-id m) id)))
+                   (ignore-errors (list-models backend))))
+        (when (and id *llm-catalog*)
+          (let ((prov (%provider-for-backend *llm-catalog* backend)))
+            (when prov
+              (find-if (lambda (m)
+                         (and (llm-model-info-p m)
+                              (equal (llm-model-info-id m) id)))
+                       (llm-provider-models prov))))))))
+
+(defgeneric count-tokens (backend thing)
+  (:documentation "Estimate tokens for THING on BACKEND.
+Default heuristic: CEILING of character length / 4. Exact tokenizers live
+in backends (llama.cpp native; HTTP backends can calibrate from LLM-USAGE)."))
+
+(defmethod count-tokens ((backend null) thing)
+  (count-tokens (%ensure-backend) thing))
+
+(defmethod count-tokens (backend (thing string))
+  (declare (ignore backend))
+  (let ((n (length thing)))
+    (if (zerop n) 0 (ceiling n 4))))
+
+(defmethod count-tokens (backend (thing llm-text-part))
+  (count-tokens backend (or (llm-text-part-text thing) "")))
+
+(defmethod count-tokens (backend (thing llm-thinking-part))
+  (count-tokens backend (or (llm-thinking-part-text thing) "")))
+
+(defmethod count-tokens (backend (thing llm-tool-call-part))
+  (+ (count-tokens backend (or (llm-tool-call-part-name thing) ""))
+     (count-tokens backend (or (llm-tool-call-part-arguments thing) ""))))
+
+(defmethod count-tokens (backend (thing llm-tool-result-part))
+  (count-tokens backend (or (llm-tool-result-part-content thing) "")))
+
+(defmethod count-tokens (backend (thing llm-part))
+  (let ((tx (part-text thing)))
+    (if (and tx (plusp (length tx)))
+        (count-tokens backend tx)
+        0)))
+
+(defmethod count-tokens (backend (thing llm-turn))
+  (count-tokens backend (turn-text thing)))
+
+(defmethod count-tokens (backend (thing llm-message-item))
+  (reduce #'+ (llm-message-item-parts thing)
+          :key (lambda (p) (count-tokens backend p))
+          :initial-value 0))
+
+(defmethod count-tokens (backend (thing cons))
+  (if (keywordp (car thing))
+      (count-tokens backend (coerce-turn thing))
+      (reduce #'+ thing
+              :key (lambda (x) (count-tokens backend x))
+              :initial-value 0)))
+
+(defmethod count-tokens (backend (thing vector))
+  (loop for x across thing sum (count-tokens backend x)))
+
+(defmethod count-tokens (backend thing)
+  (if (null thing)
+      0
+      (count-tokens backend (princ-to-string thing))))
+
+(defgeneric context-window (backend model)
+  (:documentation "Token context window for MODEL on BACKEND, or NIL.
+Looks up LLM-MODEL-INFO via LIST-MODELS / *LLM-CATALOG*, then
+LLM-PROVIDER-CONTEXT-WINDOW."))
+
+(defmethod context-window ((backend null) model)
+  (context-window (%ensure-backend) model))
+
+(defmethod context-window ((backend llm-backend) model)
+  (let ((info (%lookup-model-info backend model)))
+    (or (and (llm-model-info-p info) (llm-model-info-context-window info))
+        (let ((prov (and *llm-catalog*
+                         (%provider-for-backend *llm-catalog* backend))))
+          (and prov (llm-provider-context-window prov))))))
+
+(defun %token-budget (backend policy model)
+  (let ((reserve 0)
+        (explicit nil))
+    (etypecase policy
+      (null)
+      (integer
+       (setf explicit policy))
+      (token-fit-policy
+       (setf reserve (or (token-fit-policy-reserve policy) 0)
+             explicit (token-fit-policy-max-tokens policy))))
+    (let ((window (or explicit (context-window backend model))))
+      (when window
+        (max 0 (- window reserve))))))
+
+(defun %drop-oldest-non-system (turns)
+  (let ((dropped nil))
+    (loop for turn in turns
+          if (and (not dropped)
+                  (not (eq (llm-turn-role turn) :system)))
+            do (setf dropped t)
+          else
+            collect turn)))
+
+(defgeneric fit-turns (turns backend &key policy model)
+  (:documentation "Trim oldest non-system turns until COUNT-TOKENS fits the budget.
+Keep all :system turns. POLICY is an integer token budget or TOKEN-FIT-POLICY
+(:reserve subtracted from CONTEXT-WINDOW or :max-tokens). NIL policy uses
+CONTEXT-WINDOW; NIL window leaves TURNS unchanged."))
+
+(defmethod fit-turns (turns (backend null) &key policy model)
+  (fit-turns turns (%ensure-backend) :policy policy :model model))
+
+(defmethod fit-turns (turns backend &key policy model)
+  (let ((kept (copy-list (coerce-turns turns)))
+        (budget (%token-budget backend policy model)))
+    (if (null budget)
+        kept
+        (loop while (and (> (count-tokens backend kept) budget)
+                         (find-if (lambda (turn)
+                                    (not (eq (llm-turn-role turn) :system)))
+                                  kept))
+              do (setf kept (%drop-oldest-non-system kept))
+              finally (return kept)))))

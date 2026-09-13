@@ -6,11 +6,13 @@ CLOS **turns + typed parts** for [cl-stack](https://github.com/egao1980/cl-stack
 
 | System | Role |
 |--------|------|
-| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, `embed`, mock, provider catalog |
+| `llm-protocol` (`stack-llm`) | GFs, parts, turns, items, `embed`, tokens/context, mock, provider catalog |
 | [`llm-protocol-openai`](https://github.com/egao1980/llm-protocol-openai) (`stack-llm-openai`) | `chat/completions` + `/responses` + `/embeddings` |
 | [`llm-protocol-anthropic`](https://github.com/egao1980/llm-protocol-anthropic) (`stack-llm-anthropic`) | Messages API (official / vLLM / llama-server) |
 | `llm-protocol/capability` | `:llm` catalogue + `complete` → `generate` + `embed` |
 | `llm-protocol/schema` | `schema-protocol` + `schema-protocol-json` → `llm-response-output` |
+| `llm-protocol/router` | `llm-router-backend` + CLOS policies (fallback / budget / latency) |
+| `llm-protocol/telemetry` | GenAI semconv spans around `generate` / `respond` / `embed` |
 
 MCP sampling (`create-message` → `generate`) is [`ai-agent-protocol/mcp`](https://github.com/egao1980/ai-agent-protocol) — **not** here.
 
@@ -34,7 +36,17 @@ Brief: [`llm.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabiliti
 
 Role on the **turn**; type on the **part**. Responses grain is `llm-item` (`llm-message-item`, `llm-function-call-item`, …). `turns->items` / `items->turns` convert. Tools are descriptors, not executors.
 
-**Provider catalog** (0.2.1) is name → `llm-backend`. Not LiteLLM. Not a router/budget. Not `make-llm-catalogue` (that is capability `:llm` ops).
+**Tokens / context** (0.3.0, core, still dep-free). `count-tokens` default is `ceiling(length / 4)` for strings; turns sum `turn-text`; parts use text; sequences sum. Exact tokenizers belong in backends. `context-window` reads `llm-model-info` (or a provider-wide default). `fit-turns` drops the oldest non-system turns until the budget fits and keeps every `:system` turn. Policy is an integer token budget or `token-fit-policy` (`:reserve` subtracted from the window).
+
+```lisp
+(stack-llm:count-tokens b "abcd") ; ⇒ 1
+(stack-llm:fit-turns (list (stack-llm:system-turn "sys")
+                           (stack-llm:user-turn "old")
+                           (stack-llm:user-turn "new"))
+                     b :policy 2)
+```
+
+**Provider catalog** (0.2.1) is name → `llm-backend`. Not LiteLLM. Not `make-llm-catalogue` (that is capability `:llm` ops). Register `llm-model-info` for `context-window` and prices (`input-price` / `output-price` are **USD per 1M tokens**; backends may store per-token figures if they document it — the router treats them as per-1M). Routing and spend ceilings are `llm-protocol/router`.
 
 ```lisp
 (let ((cat (stack-llm:make-in-memory-provider-catalog)))
@@ -77,6 +89,28 @@ Structured output is `schema-protocol` (`defschema`) + `schema-protocol-json` (J
 ```
 
 Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-text` (text parts only), `llm-response-thinking` (reasoning).
+
+**Router** (`llm-protocol/router`). `llm-router-backend` implements the full GF surface by delegating through a `routing-policy`. Policies are CLOS — wrap to compose (`budget-policy` around `fallback-chain-policy`). `fallback-chain-policy` advances on `llm-error` subtypes and retryable `llm-http-error` (429 / 5xx / 408 / 409) — try the next backend, do not add a second same-backend retry loop. `budget-policy` accounts `llm-usage` per scope string against an `llm-budget` (token + cost ceilings). Over ceiling → `llm-budget-exceeded` with restarts `continue-anyway`, `use-cheaper-model`, `abort`. `least-latency-policy` picks the lowest EWMA.
+
+```lisp
+(asdf:load-system "llm-protocol/router")
+(let* ((a (stack-llm:make-mock-llm-backend :prefix "a: "))
+       (b (stack-llm:make-mock-llm-backend :prefix "b: "))
+       (policy (stack-llm:make-budget-policy
+                :inner (stack-llm:make-fallback-chain-policy :candidates (list a b))
+                :budget (stack-llm:make-llm-budget :max-tokens 10000)))
+       (r (stack-llm:make-llm-router-backend :policy policy :candidates (list a b))))
+  (stack-llm:llm-response-text (stack-llm:generate r "hi")))
+```
+
+**Telemetry** (`llm-protocol/telemetry`). Optional — core stays dep-free. `:around` methods wrap `generate` / `stream-generate` / `respond` / `stream-respond` / `embed` with `telemetry-protocol:with-span` + `instrument-gen-ai-span`. Safe against the no-op default backend. Cost is USD from `llm-usage` × `llm-model-info` `input-price` / `output-price` (USD per 1M; catalog `:models` fills gaps).
+
+```lisp
+(asdf:load-system "llm-protocol/telemetry")
+(stack-telemetry:use-recording-telemetry)
+(stack-llm:generate (stack-llm:make-mock-llm-backend) "hi")
+(stack-telemetry:recorded-spans stack-telemetry:*telemetry-backend*)
+```
 
 ## License
 
