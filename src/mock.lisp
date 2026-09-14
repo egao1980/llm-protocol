@@ -64,6 +64,23 @@
              :input-tokens (reduce #'+ texts :key #'length :initial-value 0)
              :total-tokens (reduce #'+ texts :key #'length :initial-value 0)))))
 
+(defun %json-quote (s)
+  (with-output-to-string (o)
+    (write-char #\" o)
+    (loop for c across (or s "")
+          do (case c
+               (#\" (write-string "\\\"" o))
+               (#\\ (write-string "\\\\" o))
+               (#\Newline (write-string "\\n" o))
+               (#\Return (write-string "\\r" o))
+               (#\Tab (write-string "\\t" o))
+               (t (write-char c o))))
+    (write-char #\" o)))
+
+(defun %mock-structured-text (user-text)
+  (format nil "{\"question\":~a,\"subquestions\":[{\"id\":\"q1\",\"question\":~a,\"rationale\":\"\"}]}"
+          (%json-quote user-text) (%json-quote user-text)))
+
 (defmethod generate ((backend mock-llm-backend) turns &key model settings tools
                      tool-choice output)
   (declare (ignore output))
@@ -77,10 +94,12 @@
                                   tc
                                   (%coerce-tool-call-part tc)))
                             (%as-list (mock-llm-tool-calls backend))))
-               (out-text (if tcs
-                             ""
-                             (concatenate 'string (mock-llm-prefix backend)
-                                          user-text)))
+               (schema (and settings (llm-settings-output settings)))
+               (out-text (cond
+                           (tcs "")
+                           (schema (%mock-structured-text user-text))
+                           (t (concatenate 'string (mock-llm-prefix backend)
+                                           user-text))))
                (parts (if tcs
                           tcs
                           (list (make-llm-text-part :text out-text))))

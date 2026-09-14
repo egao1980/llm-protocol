@@ -70,6 +70,42 @@
       (ok (llm-protocol:llm-response-p r))
       (ok (equal "x" (llm-protocol:llm-response-text r))))))
 
+(deftest router-preserves-ignore-output-on-output-error
+  "handler-case used to re-signal LLM-OUTPUT-ERROR and drop IGNORE-OUTPUT."
+  (let* ((b (llm-protocol:make-mock-llm-backend
+             :handler (lambda (backend turns &key &allow-other-keys)
+                        (declare (ignore backend turns))
+                        (llm-protocol:make-llm-response
+                         :parts (list (llm-protocol:make-llm-text-part
+                                       :text "not-json"))))))
+         (router (llm-protocol:make-llm-router-backend :candidates (list b))))
+    (ok (signals (llm-protocol:generate router "hi" :output '%llm-city)
+                 'llm-protocol:llm-output-error))
+    (let ((r (llm-protocol:with-auto-ignore-output
+               (llm-protocol:generate router "hi" :output '%llm-city))))
+      (ok (llm-protocol:llm-response-p r))
+      (ok (null (llm-protocol:llm-response-output r)))
+      (ok (search "not-json" (or (llm-protocol:llm-response-text r) ""))))))
+
+(deftest fallback-chain-does-not-advance-on-output-error
+  (let* ((n 0)
+         (fail (llm-protocol:make-mock-llm-backend
+                :handler (lambda (backend turns &key &allow-other-keys)
+                           (declare (ignore backend turns))
+                           (incf n)
+                           (llm-protocol:make-llm-response
+                            :parts (list (llm-protocol:make-llm-text-part
+                                          :text "not-json"))))))
+         (ok-b (llm-protocol:make-mock-llm-backend :prefix "ok: "))
+         (cands (list fail ok-b))
+         (router (llm-protocol:make-llm-router-backend
+                  :policy (llm-protocol:make-fallback-chain-policy
+                           :candidates cands)
+                  :candidates cands)))
+    (ok (signals (llm-protocol:generate router "hi" :output '%llm-city)
+                 'llm-protocol:llm-output-error))
+    (ok (= 1 n))))
+
 (deftest router-embed-delegates
   (let* ((b (llm-protocol:make-mock-llm-backend))
          (router (llm-protocol:make-llm-router-backend :candidates (list b)))

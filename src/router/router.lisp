@@ -135,14 +135,10 @@ Cost uses LLM-MODEL-INFO INPUT-PRICE / OUTPUT-PRICE as USD per 1M tokens."))
     (t nil)))
 
 (defun %fallback-worthy-p (condition)
-  (cond
-    ((typep condition 'llm-http-error)
-     (llm-http-error-retryable-p condition))
-    ((typep condition 'llm-output-error)
-     nil)
-    ((typep condition 'llm-error)
-     t)
-    (t nil)))
+  "Only retryable HTTP errors advance the fallback chain.
+   LLM-OUTPUT-ERROR keeps IGNORE-OUTPUT / RETRY on the signaling frame."
+  (and (typep condition 'llm-http-error)
+       (llm-http-error-retryable-p condition)))
 
 (defun %scope-usage (policy scope)
   (let ((table (budget-policy-ledgers policy)))
@@ -313,34 +309,33 @@ Cost uses LLM-MODEL-INFO INPUT-PRICE / OUTPUT-PRICE as USD per 1M tokens."))
          (unless backend
            (error 'llm-missing-backend
                   :message "llm router has no backend for this request"))
-         (handler-case
-             (let ((result (funcall fn backend
-                                    (or forced-model
-                                        (route-request-model request)))))
-               (record-latency policy backend
-                               (float (/ (- (get-internal-real-time) start)
-                                         internal-time-units-per-second)
-                                      1.0d0))
-               (record-usage policy scope (%result-usage result)
-                             :backend backend
-                             :model (or forced-model
-                                        (route-request-model request)
-                                        (and (llm-response-p result)
-                                             (llm-response-model result))
-                                        (and (llm-embed-result-p result)
-                                             (llm-embed-result-model result))))
-               (return-from %router-dispatch result))
-           (llm-error (c)
-             (let ((next (remove backend remaining :count 1 :test #'eq)))
-               (if (and (%has-fallback-chain policy)
-                        (%fallback-worthy-p c)
-                        next
-                        (not (eq next remaining)))
-                   (progn
+         (handler-bind
+             ((llm-http-error
+               (lambda (c)
+                 (let ((next (remove backend remaining :count 1 :test #'eq)))
+                   (when (and (%has-fallback-chain policy)
+                              (%fallback-worthy-p c)
+                              next
+                              (not (eq next remaining)))
                      (setf remaining next
                            forced nil)
-                     (go :next))
-                   (error c)))))))))
+                     (go :next))))))
+           (let ((result (funcall fn backend
+                                  (or forced-model
+                                      (route-request-model request)))))
+             (record-latency policy backend
+                             (float (/ (- (get-internal-real-time) start)
+                                       internal-time-units-per-second)
+                                    1.0d0))
+             (record-usage policy scope (%result-usage result)
+                           :backend backend
+                           :model (or forced-model
+                                      (route-request-model request)
+                                      (and (llm-response-p result)
+                                           (llm-response-model result))
+                                      (and (llm-embed-result-p result)
+                                           (llm-embed-result-model result))))
+             (return-from %router-dispatch result)))))))))
 
 (defmethod backend-model ((backend llm-router-backend))
   (let ((b (%router-select backend)))
