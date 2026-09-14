@@ -335,7 +335,7 @@ Cost uses LLM-MODEL-INFO INPUT-PRICE / OUTPUT-PRICE as USD per 1M tokens."))
                                            (llm-response-model result))
                                       (and (llm-embed-result-p result)
                                            (llm-embed-result-model result))))
-             (return-from %router-dispatch result)))))))))
+             (return-from %router-dispatch result)))))))
 
 (defmethod backend-model ((backend llm-router-backend))
   (let ((b (%router-select backend)))
