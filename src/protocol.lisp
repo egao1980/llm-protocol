@@ -649,8 +649,7 @@ CLOS designators need llm-protocol/schema.")
   (append (%as-turns payload)
           (list (assistant-turn (or raw-text ""))
                 (user-turn
-                 (format nil "~a~%Previous completion:~%~a~%~%~
-Reply with JSON only (no markdown fences) matching this schema:~%~a"
+                 (format nil "~a~%Previous completion:~%~a~%~%Reply with JSON only (no markdown fences) matching this schema:~%~a"
                          +structured-output-repair-preamble+
                          (or raw-text "")
                          (%schema-hint schema))))))
