@@ -8,7 +8,8 @@
 ;;;   ignore-output — leave LLM-RESPONSE-OUTPUT NIL on a parse failure
 ;;;
 ;;; RETRY is for transient HTTP (429 / 408 / 409 / 5xx). Do not default-retry
-;;; structured-output parse failures.
+;;; structured-output parse failures — that is *STRUCTURED-OUTPUT-REPAIR*
+;;; (one extra GENERATE + relaxed parse + text fallback), not HTTP RETRY.
 
 (define-condition llm-error (error)
   ((message :initarg :message :reader llm-error-message :initform nil))

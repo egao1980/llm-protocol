@@ -94,8 +94,10 @@
            #:llm-settings-top-p
            #:llm-settings-response-format
            #:llm-settings-output
+           #:llm-settings-output-repair
            #:llm-settings-extra
            #:coerce-settings
+           #:*structured-output-repair*
 
            #:llm-tool
            #:make-llm-tool

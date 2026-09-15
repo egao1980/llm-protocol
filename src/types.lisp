@@ -110,14 +110,18 @@
                     :initform nil)
    (output :initarg :output :accessor llm-settings-output :initform nil
            :documentation "schema-protocol designator, JSON Schema hash, or NIL.")
+   (output-repair :initarg :output-repair :accessor llm-settings-output-repair
+                  :initform :inherit
+                  :documentation "Overrides *STRUCTURED-OUTPUT-REPAIR* for one call.
+:INHERIT uses the special. NIL / :SIGNAL signals LLM-OUTPUT-ERROR.")
    (extra :initarg :extra :accessor llm-settings-extra :initform nil)))
 
 (defun make-llm-settings (&key temperature max-tokens stop top-p response-format
-                            output extra)
+                            output extra (output-repair :inherit))
   (make-instance 'llm-settings
                  :temperature temperature :max-tokens max-tokens :stop stop
                  :top-p top-p :response-format response-format
-                 :output output :extra extra))
+                 :output output :output-repair output-repair :extra extra))
 
 (defun llm-settings-p (x)
   (typep x 'llm-settings))

@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.3.0"
+  :version "0.3.1"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"

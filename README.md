@@ -88,6 +88,20 @@ Structured output is `schema-protocol` (`defschema`) + `schema-protocol-json` (J
   (slot-value (stack-llm:llm-response-output r) 'name))
 ```
 
+When `:output` is set and parse fails, GENERATE applies `*structured-output-repair*` (default `:repair`) — this is **not** HTTP `retry`:
+
+1. **retry-with-repair-prompt** — one extra GENERATE that includes the raw completion and a schema hint
+2. **relaxed parse** — first JSON object/array in mixed text or markdown fences (`` ``` `` / `` ```json ``)
+3. **text fallback** — leave `llm-response-output` NIL; do not signal
+
+`:signal` (or bind `*structured-output-repair*` to `nil`) restores `llm-output-error` + `ignore-output` / `use-value`. Per-call override: `:output-repair` or `llm-settings-output-repair`. Mock advertises `(backend-supports-p backend :structured-output)`.
+
+```lisp
+(let ((stack-llm:*structured-output-repair* :relaxed))
+  (stack-llm:generate b "city" :output 'city))
+;; markdown-fenced or prose-wrapped JSON parses without a second GENERATE
+```
+
 Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-text` (text parts only), `llm-response-thinking` (reasoning).
 
 **Router** (`llm-protocol/router`). `llm-router-backend` implements the full GF surface by delegating through a `routing-policy`. Policies are CLOS — wrap to compose (`budget-policy` around `fallback-chain-policy`). `fallback-chain-policy` advances on `llm-error` subtypes and retryable `llm-http-error` (429 / 5xx / 408 / 409) — try the next backend, do not add a second same-backend retry loop. `budget-policy` accounts `llm-usage` per scope string against an `llm-budget` (token + cost ceilings). Over ceiling → `llm-budget-exceeded` with restarts `continue-anyway`, `use-cheaper-model`, `abort`. `least-latency-policy` picks the lowest EWMA.

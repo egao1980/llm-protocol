@@ -62,7 +62,10 @@
     (ok (llm-protocol:backend-supports-p b :stream))
     (ok (llm-protocol:backend-supports-p b :responses))
     (ok (llm-protocol:backend-supports-p b :embeddings))
-    (ng (llm-protocol:backend-supports-p b :vision))))
+    (ok (llm-protocol:backend-supports-p b :structured-output))
+    (ng (llm-protocol:backend-supports-p b :vision))
+    (ng (llm-protocol:backend-supports-p (make-instance 'llm-protocol:llm-backend)
+                                         :structured-output))))
 
 (deftest mock-embed
   (let* ((b (llm-protocol:make-mock-llm-backend))

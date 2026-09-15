@@ -1,7 +1,8 @@
 (in-package #:llm-protocol)
 
 ;;; CLOS output via schema-protocol; JSON Schema emit via schema-protocol-json.
-;;; Not a PydanticAI Agent — no retries, no output tools.
+;;; Not a PydanticAI Agent — no output tools. Parse-failure repair lives in
+;;; GENERATE (*STRUCTURED-OUTPUT-REPAIR*), not here.
 
 (defun %json-object (source)
   (cond

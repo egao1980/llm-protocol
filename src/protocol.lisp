@@ -395,7 +395,8 @@ items is an error — use COERCE-ITEMS.")
     (llm-settings object)
     (list (apply #'make-llm-settings object))))
 
-(defun copy-llm-settings (settings &key (output nil outputp))
+(defun copy-llm-settings (settings &key (output nil outputp)
+                                     (output-repair nil output-repair-p))
   (make-llm-settings
    :temperature (llm-settings-temperature settings)
    :max-tokens (llm-settings-max-tokens settings)
@@ -403,6 +404,9 @@ items is an error — use COERCE-ITEMS.")
    :top-p (llm-settings-top-p settings)
    :response-format (llm-settings-response-format settings)
    :output (if outputp output (llm-settings-output settings))
+   :output-repair (if output-repair-p
+                      output-repair
+                      (llm-settings-output-repair settings))
    :extra (llm-settings-extra settings)))
 
 (defun %settings-with-output (settings output)
@@ -411,6 +415,11 @@ items is an error — use COERCE-ITEMS.")
       ((null output) s)
       ((null s) (make-llm-settings :output output))
       (t (copy-llm-settings s :output output)))))
+
+(defun %settings-with-repair (settings output-repair)
+  (cond
+    ((null settings) (make-llm-settings :output-repair output-repair))
+    (t (copy-llm-settings settings :output-repair output-repair))))
 
 (defun llm-response-text (response)
   "Assistant text parts only (not thinking)."
@@ -475,19 +484,85 @@ CLOS designators need llm-protocol/schema.")
          (let ((c (char s 0)))
            (or (char= c #\{) (char= c #\[))))))
 
-(defun try-parse-json-output (source)
+(defun %try-decode-json-text (text)
+  (when (%looks-like-json text)
+    (let* ((pkg (find-package '#:json-protocol))
+           (decode (and pkg (find-symbol "DECODE" pkg)))
+           (backend (and pkg (find-symbol "*JSON-BACKEND*" pkg))))
+      (when (and decode (fboundp decode) backend (symbol-value backend))
+        (ignore-errors (funcall decode text))))))
+
+(defun %fence-body (text)
+  "Body of the first markdown fence (``` / ```json), or NIL."
+  (let ((start (search "```" text)))
+    (when start
+      (let* ((after-open (+ start 3))
+             (nl (position #\Newline text :start after-open))
+             (body-start (if nl (1+ nl) after-open))
+             (close (search "```" text :start2 body-start)))
+        (when close
+          (string-trim '(#\Space #\Tab #\Newline #\Return)
+                       (subseq text body-start close)))))))
+
+(defun %extract-balanced-json (text start)
+  "Substring of TEXT from START that is one JSON object or array."
+  (declare (type string text))
+  (let ((n (length text)))
+    (when (and (integerp start) (< -1 start n))
+      (let ((open (char text start)))
+        (when (or (char= open #\{) (char= open #\[))
+          (let ((depth 0)
+                (in-string nil)
+                (escape nil))
+            (loop for i from start below n
+                  for c = (char text i)
+                  do (cond
+                       (escape
+                        (setf escape nil))
+                       ((char= c #\\)
+                        (when in-string (setf escape t)))
+                       ((char= c #\")
+                        (setf in-string (not in-string)))
+                       (in-string
+                        nil)
+                       ((or (char= c #\{) (char= c #\[))
+                        (incf depth))
+                       ((or (char= c #\}) (char= c #\]))
+                        (decf depth)
+                        (when (zerop depth)
+                          (return (subseq text start (1+ i)))))))))))))
+
+(defun %first-json-index (text)
+  (loop for i from 0 below (length text)
+        for c = (char text i)
+        when (or (char= c #\{) (char= c #\[))
+          return i))
+
+(defun %extract-json-text (source)
+  "Best-effort JSON object/array substring: fences, then first balanced value."
+  (let ((s (%trimmed-text source)))
+    (when (plusp (length s))
+      (or (and (%looks-like-json s)
+               (or (%extract-balanced-json s 0) s))
+          (let ((fence (%fence-body s)))
+            (when (and fence (plusp (length fence)))
+              (or (%extract-json-text fence) fence)))
+          (let ((i (%first-json-index s)))
+            (and i (%extract-balanced-json s i)))))))
+
+(defun try-parse-json-output (source &key relaxed)
   "Decode SOURCE as JSON when it looks like an object/array. Else NIL.
-   Soft-uses json-protocol when a backend is bound."
+   Soft-uses json-protocol when a backend is bound.
+   RELAXED T: extract the first JSON object/array from mixed text or
+   markdown fences (``` / ```json) before decoding."
   (cond
     ((hash-table-p source) source)
     ((and (vectorp source) (not (stringp source))) source)
-    ((not (%looks-like-json source)) nil)
     (t
-     (let* ((pkg (find-package '#:json-protocol))
-            (decode (and pkg (find-symbol "DECODE" pkg)))
-            (backend (and pkg (find-symbol "*JSON-BACKEND*" pkg))))
-       (when (and decode (fboundp decode) backend (symbol-value backend))
-         (ignore-errors (funcall decode (%trimmed-text source))))))))
+     (or (%try-decode-json-text (%trimmed-text source))
+         (and relaxed
+              (let ((extracted (%extract-json-text source)))
+                (and extracted (%try-decode-json-text extracted))))))))
 
 (defun %signal-output-error (response err &optional cause)
   (when (typep err 'llm-output-error)
@@ -511,20 +586,121 @@ CLOS designators need llm-protocol/schema.")
         :report "Leave LLM-RESPONSE-OUTPUT NIL"
         nil))))
 
-(defun %attach-structured-output (response settings)
+(defvar *structured-output-repair* :repair
+  "Policy when GENERATE / RESPOND is given :OUTPUT and parse fails.
+
+  :REPAIR   — one extra GENERATE (raw completion + schema hint), then
+              relaxed parse, then text fallback (output stays NIL).
+  :RELAXED  — skip the extra GENERATE; extract JSON from mixed text /
+              markdown fences, then text fallback.
+  :FALLBACK — leave LLM-RESPONSE-OUTPUT NIL; do not signal.
+  :SIGNAL   — signal LLM-OUTPUT-ERROR (IGNORE-OUTPUT / USE-VALUE).
+  NIL / :OFF / :ERROR are :SIGNAL. T is :REPAIR.
+
+  Per-call override: GENERATE :OUTPUT-REPAIR or LLM-SETTINGS-OUTPUT-REPAIR.
+  This is not HTTP RETRY.")
+
+(defvar *%structured-output-repairing* nil
+  "Bound T while the one extra repair GENERATE is in flight.")
+
+(defun %normalize-repair-policy (policy)
+  (cond
+    ((null policy) :signal)
+    ((eq policy t) :repair)
+    ((eq policy :repair) :repair)
+    ((eq policy :relaxed) :relaxed)
+    ((member policy '(:fallback :ignore) :test #'eq) :fallback)
+    ((member policy '(:signal :off :error) :test #'eq) :signal)
+    ((eq policy :inherit)
+     (let ((v *structured-output-repair*))
+       (if (eq v :inherit) :repair (%normalize-repair-policy v))))
+    (t :repair)))
+
+(defun %effective-repair-policy (settings)
+  (let ((from (if settings (llm-settings-output-repair settings) :inherit)))
+    (if (eq from :inherit)
+        (%normalize-repair-policy *structured-output-repair*)
+        (%normalize-repair-policy from))))
+
+(defun %as-turns (payload)
+  (cond
+    ((null payload) nil)
+    ((or (llm-item-p payload)
+         (and (consp payload) (not (keywordp (car payload)))
+              (llm-item-p (first payload))))
+     (items->turns (coerce-items payload)))
+    (t (coerce-turns payload))))
+
+(defun %schema-hint (schema)
+  (or (ignore-errors
+        (let ((js (structured-output-json-schema schema)))
+          (when (hash-table-p js)
+            (let* ((pkg (find-package '#:json-protocol))
+                   (encode (and pkg (find-symbol "ENCODE" pkg)))
+                   (backend (and pkg (find-symbol "*JSON-BACKEND*" pkg))))
+              (when (and encode (fboundp encode) backend (symbol-value backend))
+                (funcall encode js))))))
+      (prin1-to-string schema)))
+
+(defparameter +structured-output-repair-preamble+
+  "The previous completion was not valid structured output.")
+
+(defun %repair-turns (payload raw-text schema)
+  (append (%as-turns payload)
+          (list (assistant-turn (or raw-text ""))
+                (user-turn
+                 (format nil "~a~%Previous completion:~%~a~%~%~
+Reply with JSON only (no markdown fences) matching this schema:~%~a"
+                         +structured-output-repair-preamble+
+                         (or raw-text "")
+                         (%schema-hint schema))))))
+
+(defun %repair-structured-output (backend payload args settings response policy)
+  "Apply remaining repair steps. Returns RESPONSE or the repair GENERATE result."
+  (let ((schema (llm-settings-output settings)))
+    (when (eq policy :repair)
+      (let* ((raw (or (llm-response-text response) ""))
+             (*%structured-output-repairing* t)
+             (repaired
+              (generate backend (%repair-turns payload raw schema)
+                        :model (getf args :model)
+                        :settings settings
+                        :tools (getf args :tools)
+                        :tool-choice (getf args :tool-choice)
+                        :output schema
+                        :output-repair :fallback)))
+        (when (and repaired (llm-response-output repaired))
+          (return-from %repair-structured-output repaired))
+        (%attach-structured-output repaired settings :relaxed t :on-error :decline)
+        (when (and repaired (llm-response-output repaired))
+          (return-from %repair-structured-output repaired))))
+    (when (member policy '(:repair :relaxed) :test #'eq)
+      (%attach-structured-output response settings :relaxed t :on-error :decline)
+      (when (and response (llm-response-output response))
+        (return-from %repair-structured-output response)))
+    response))
+
+(defun %attach-structured-output (response settings &key relaxed (on-error :signal))
   (when (and response (null (llm-response-output response)))
     (let ((schema (and settings (llm-settings-output settings)))
           (text (llm-response-text response)))
       (if schema
           (handler-case
-              (let ((out (parse-structured-output schema text)))
+              (let* ((source (if relaxed
+                                 (or (%extract-json-text text) text)
+                                 text))
+                     (out (parse-structured-output schema source)))
                 (when out
                   (setf (llm-response-output response) out)))
             (llm-output-error (e)
-              (%signal-output-error response e))
+              (if (eq on-error :signal)
+                  (%signal-output-error response e)
+                  nil))
             (error (e)
-              (%signal-output-error response e e)))
-          (let ((out (try-parse-json-output text)))
+              (if (eq on-error :signal)
+                  (%signal-output-error response e e)
+                  nil)))
+          (let ((out (try-parse-json-output text :relaxed relaxed)))
             (when out
               (setf (llm-response-output response) out))))))
   response)
@@ -533,7 +709,8 @@ CLOS designators need llm-protocol/schema.")
   (:documentation "One-shot generation. TURNS: string, LLM-TURN, or a sequence of those.
 TOOLS are descriptors (LLM-TOOL), not executors. SETTINGS is LLM-SETTINGS or a plist.
 OUTPUT is a schema-protocol designator (or JSON Schema hash) — parsed into
-LLM-RESPONSE-OUTPUT. → LLM-RESPONSE."))
+LLM-RESPONSE-OUTPUT. Parse failures follow *STRUCTURED-OUTPUT-REPAIR*
+(override with :OUTPUT-REPAIR / LLM-SETTINGS-OUTPUT-REPAIR). → LLM-RESPONSE."))
 
 (defgeneric stream-generate (backend turns &key model settings tools tool-choice
                              on-part output)
@@ -555,12 +732,24 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
   (with-llm-restarts
     (let* ((settings (getf args :settings))
            (output (getf args :output))
+           (repair-tail (member :output-repair args))
            (effective (%settings-with-output settings output))
+           (effective (if repair-tail
+                          (%settings-with-repair effective (second repair-tail))
+                          effective))
            (pass (loop for (k v) on args by #'cddr
-                       unless (member k '(:settings :output))
+                       unless (member k '(:settings :output :output-repair))
                          collect k and collect v))
+           (policy (%effective-repair-policy effective))
+           (on-error (if (eq policy :signal) :signal :decline))
            (r (apply fn backend payload :settings effective pass)))
-      (%attach-structured-output r effective)
+      (%attach-structured-output r effective :on-error on-error)
+      (when (and (not *%structured-output-repairing*)
+                 effective
+                 (llm-settings-output effective)
+                 (null (and r (llm-response-output r)))
+                 (not (eq policy :signal)))
+        (setf r (%repair-structured-output backend payload args effective r policy)))
       r)))
 
 (defmethod generate :around ((backend llm-backend) turns &rest args
