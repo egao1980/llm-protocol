@@ -21,6 +21,7 @@
     (ok (capability-protocol:capability-supported-p cat :llm-tools))
     (ok (capability-protocol:capability-supported-p cat :llm-responses))
     (ok (capability-protocol:capability-supported-p cat :llm-embeddings))
+    (ok (capability-protocol:capability-supported-p cat :llm-structured-output))
     (ng (capability-protocol:capability-supported-p cat :llm-vision))
     (ok (capability-protocol:catalogue-defines-p cat :llm-vision))
     (let ((gen (capability-protocol:get-capability cat :llm-generation)))

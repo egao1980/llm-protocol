@@ -63,7 +63,8 @@
     (ok (= 1 n))))
 
 (deftest output-error-ignore-output
-  (let ((b (llm-protocol:make-mock-llm-backend
+  (let ((llm-protocol:*structured-output-repair* :signal)
+        (b (llm-protocol:make-mock-llm-backend
             :handler (lambda (backend turns &key &allow-other-keys)
                        (declare (ignore backend turns))
                        (llm-protocol:make-llm-response
@@ -75,7 +76,8 @@
       (ok (null (llm-protocol:llm-response-output r))))))
 
 (deftest output-error-use-value
-  (let ((b (llm-protocol:make-mock-llm-backend
+  (let ((llm-protocol:*structured-output-repair* :signal)
+        (b (llm-protocol:make-mock-llm-backend
             :handler (lambda (backend turns &key &allow-other-keys)
                        (declare (ignore backend turns))
                        (llm-protocol:make-llm-response
