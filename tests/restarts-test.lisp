@@ -88,3 +88,70 @@
                                (use-value :patched c))))
                (llm-protocol:generate b "city" :output '%llm-city))))
       (ok (eq :patched (llm-protocol:llm-response-output r))))))
+
+(deftest retry-classes
+  (flet ((cls (status &rest args)
+           (llm-protocol:llm-retry-class
+            (apply #'make-condition 'llm-protocol:llm-http-error :status status args))))
+    (ok (eq :rate-limit (cls 429)))
+    (ok (eq :overloaded (cls 529)))
+    (ok (eq :overloaded (cls 503)))
+    (ok (eq :transient (cls 500)))
+    (ng (cls 401))
+    (ng (cls 500 :retryable-p nil)))
+  (let ((c (make-condition 'llm-protocol:llm-context-overflow :status 400)))
+    (ok (eq :context-overflow (llm-protocol:llm-retry-class c)))
+    (ng (llm-protocol:llm-http-error-retryable-p c)))
+  (ng (llm-protocol:llm-retry-class (make-condition 'llm-protocol:llm-error)))
+  (ok (llm-protocol:context-overflow-text-p "prompt is too long: 210000 tokens > 200000 maximum"))
+  (ok (llm-protocol:context-overflow-text-p "{\"code\":\"context_length_exceeded\"}"))
+  (ng (llm-protocol:context-overflow-text-p "invalid x-api-key")))
+
+(deftest retry-delay-backoff-and-retry-after
+  (let ((p (llm-protocol:make-retry-policy :max-attempts 4 :base-delay 1 :max-delay 10))
+        (c (make-condition 'llm-protocol:llm-http-error :status 500)))
+    (ok (= 1 (llm-protocol:retry-delay p c 1)))
+    (ok (= 2 (llm-protocol:retry-delay p c 2)))
+    (ok (= 4 (llm-protocol:retry-delay p c 3)))
+    (ng (llm-protocol:retry-delay p c 4))
+    (ok (= 4 (llm-protocol:retry-delay
+              p (make-condition 'llm-protocol:llm-http-error :status 529) 2)))
+    (ok (= 7 (llm-protocol:retry-delay
+              p (make-condition 'llm-protocol:llm-http-error :status 429 :retry-after 7) 1)))
+    (ok (= 10 (llm-protocol:retry-delay
+               p (make-condition 'llm-protocol:llm-http-error :status 429 :retry-after 99) 1)))
+    (ng (llm-protocol:retry-delay
+         p (make-condition 'llm-protocol:llm-context-overflow :status 400) 1))
+    (ng (llm-protocol:retry-delay
+         (llm-protocol:make-retry-policy :classes '(:rate-limit)) c 1))))
+
+(deftest call-with-retry-policy-sleeps-between-tries
+  (let ((n 0) (slept '()))
+    (ok (eq :done
+            (llm-protocol:call-with-retry-policy
+             (lambda ()
+               (incf n)
+               (if (< n 3)
+                   (error 'llm-protocol:llm-http-error :status 503)
+                   :done))
+             :policy (llm-protocol:make-retry-policy :base-delay 1)
+             :sleep (lambda (s) (push s slept)))))
+    (ok (= 3 n))
+    (ok (equal '(4 2) slept)))
+  (let ((n 0))
+    (ok (signals (llm-protocol:call-with-retry-policy
+                  (lambda ()
+                    (incf n)
+                    (error 'llm-protocol:llm-http-error :status 401))
+                  :sleep (lambda (s) (declare (ignore s))))
+                 'llm-protocol:llm-http-error))
+    (ok (= 1 n)))
+  (let ((n 0))
+    (ok (signals (llm-protocol:call-with-retry-policy
+                  (lambda ()
+                    (incf n)
+                    (error 'llm-protocol:llm-http-error :status 500))
+                  :policy (llm-protocol:make-retry-policy :max-attempts 2)
+                  :sleep (lambda (s) (declare (ignore s))))
+                 'llm-protocol:llm-http-error))
+    (ok (= 2 n))))

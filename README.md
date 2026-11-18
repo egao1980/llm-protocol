@@ -104,6 +104,15 @@ When `:output` is set and parse fails, GENERATE applies `*structured-output-repa
 
 Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-text` (text parts only), `llm-response-thinking` (reasoning).
 
+**Retry by failure class.** `llm-retry-class` sorts a failure: `:rate-limit` (429), `:overloaded` (503 / 529), `:transient` (408 / 409 / other 5xx), `:context-overflow`, or NIL (auth, bad request). A `retry-policy` (default `*retry-policy*`: 5 attempts, 2 s doubling, 30 s cap) says which classes to retry; `retry-delay` honours the provider's `Retry-After` (`llm-http-error-retry-after`) and waits twice as long on `:overloaded`. `call-with-retry-policy` / `with-retry-policy` run a call under it (injectable `:sleep`). `llm-context-overflow` is never retried as is — backends signal it when `context-overflow-text-p` matches the error body, and the caller compacts first.
+
+```lisp
+(stack-llm:with-retry-policy (:policy (stack-llm:make-retry-policy :max-attempts 3))
+  (stack-llm:generate b "hi"))
+```
+
+**Tokens anchored on usage.** `llm-usage` carries `cache-read-tokens` / `cache-write-tokens`; `llm-usage-prompt-tokens` is the whole measured prompt. `compaction-part-p` marks a provider-side compaction summary (Anthropic `compaction` block); turns before the turn holding it can be dropped locally. `(anchored-token-count backend turns :usage u :anchor-count n)` counts the first N turns (the prompt U measured plus its reply) as measured and estimates only the turns after them — far closer than the chars/4 heuristic over the whole history.
+
 **Router** (`llm-protocol/router`). `llm-router-backend` implements the full GF surface by delegating through a `routing-policy`. Policies are CLOS — wrap to compose (`budget-policy` around `fallback-chain-policy`). `fallback-chain-policy` advances on `llm-error` subtypes and retryable `llm-http-error` (429 / 5xx / 408 / 409) — try the next backend, do not add a second same-backend retry loop. `budget-policy` accounts `llm-usage` per scope string against an `llm-budget` (token + cost ceilings). Over ceiling → `llm-budget-exceeded` with restarts `continue-anyway`, `use-cheaper-model`, `abort`. `least-latency-policy` picks the lowest EWMA.
 
 ```lisp

@@ -56,3 +56,20 @@
          (llm-protocol:*llm-catalog* cat))
     (llm-protocol:register-provider cat "mock" b :context-window 8192)
     (ok (= 8192 (llm-protocol:context-window b "mock")))))
+
+(deftest anchored-token-count-uses-measured-usage
+  (let* ((b (make-instance 'llm-protocol:llm-backend))
+         (turns (list (llm-protocol:user-turn "abcd")
+                      (llm-protocol:assistant-turn "abcd")
+                      (llm-protocol:user-turn "abcdefgh")))
+         (usage (llm-protocol:make-llm-usage :input-tokens 10 :output-tokens 5
+                                             :cache-read-tokens 100
+                                             :cache-write-tokens 20)))
+    (ok (= 135 (llm-protocol:llm-usage-prompt-tokens
+                (llm-protocol:make-llm-usage :input-tokens 10 :cache-read-tokens 100
+                                             :cache-write-tokens 25))))
+    (ok (= 4 (llm-protocol:anchored-token-count b turns)))
+    ;; 130 measured prompt + 5 output, then "abcdefgh" estimated as 2.
+    (ok (= 137 (llm-protocol:anchored-token-count b turns :usage usage :anchor-count 2)))
+    (ok (= 4 (llm-protocol:anchored-token-count
+              b turns :usage (llm-protocol:make-llm-usage) :anchor-count 2)))))

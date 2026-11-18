@@ -39,6 +39,9 @@
 (define-condition llm-http-error (llm-error)
   ((status :initarg :status :reader llm-http-error-status :initform nil)
    (body :initarg :body :reader llm-http-error-body :initform nil)
+   (retry-after :initarg :retry-after :reader llm-http-error-retry-after
+                :initform nil
+                :documentation "Seconds the provider asked to wait (Retry-After), or NIL.")
    (retryable-p :initarg :retryable-p))
   (:report (lambda (c s)
              (format s "llm HTTP error~@[ ~a~]~@[: ~a~]"
@@ -77,6 +80,120 @@
                      (llm-budget-exceeded-used-cost c)
                      (llm-budget-exceeded-max-cost c)
                      (llm-error-message c)))))
+
+;;; --- context overflow + retry classes -------------------------------------
+
+(define-condition llm-context-overflow (llm-http-error) ()
+  (:default-initargs :retryable-p nil)
+  (:documentation "The prompt does not fit the model's context window. Never
+retried as is: compact the turns (conversation-protocol COMPACT-TURNS) first.")
+  (:report (lambda (c s)
+             (format s "llm prompt exceeds the context window~@[ (HTTP ~a)~]~@[: ~a~]"
+                     (llm-http-error-status c)
+                     (llm-error-message c)))))
+
+(defparameter +context-overflow-markers+
+  '("prompt is too long" "context_length_exceeded" "maximum context length"
+    "context length" "context window" "too many tokens" "input is too long"
+    "exceeds the context" "request too large")
+  "Lower-case phrases providers use for an oversized prompt.")
+
+(defun context-overflow-text-p (text)
+  "T when TEXT (an error message or body) says the prompt is too long.
+Backends use it to signal LLM-CONTEXT-OVERFLOW instead of LLM-HTTP-ERROR."
+  (and (stringp text)
+       (let ((low (string-downcase text)))
+         (some (lambda (m) (search m low)) +context-overflow-markers+))
+       t))
+
+(defgeneric llm-retry-class (condition)
+  (:documentation "Failure class of CONDITION for a RETRY-POLICY:
+:RATE-LIMIT (429), :OVERLOADED (503 / 529), :TRANSIENT (408 / 409 / other
+5xx), :CONTEXT-OVERFLOW, or NIL (not retryable: auth, bad request, ...).")
+  (:method ((condition condition)) nil)
+  (:method ((condition llm-context-overflow)) :context-overflow)
+  (:method ((condition llm-http-error))
+    (when (llm-http-error-retryable-p condition)
+      (case (llm-http-error-status condition)
+        (429 :rate-limit)
+        ((503 529) :overloaded)
+        (t :transient)))))
+
+(defclass retry-policy ()
+  ((max-attempts :initarg :max-attempts :accessor retry-policy-max-attempts
+                 :initform 5
+                 :documentation "Attempts in all, the first one included.")
+   (base-delay :initarg :base-delay :accessor retry-policy-base-delay
+               :initform 2
+               :documentation "Seconds before the second attempt; doubles after.")
+   (max-delay :initarg :max-delay :accessor retry-policy-max-delay
+              :initform 30
+              :documentation "Upper bound on one wait, Retry-After included.")
+   (classes :initarg :classes :accessor retry-policy-classes
+            :initform '(:rate-limit :overloaded :transient)
+            :documentation "LLM-RETRY-CLASS values this policy retries."))
+  (:documentation "Which failures to retry and how long to wait between tries."))
+
+(defun make-retry-policy (&key (max-attempts 5) (base-delay 2) (max-delay 30)
+                            (classes '(:rate-limit :overloaded :transient)))
+  (check-type max-attempts (integer 1 *))
+  (check-type base-delay (real 0 *))
+  (check-type max-delay (real 0 *))
+  (make-instance 'retry-policy :max-attempts max-attempts :base-delay base-delay
+                               :max-delay max-delay :classes classes))
+
+(defvar *retry-policy* (make-retry-policy)
+  "Default policy for CALL-WITH-RETRY-POLICY and the ai-agent generate step.")
+
+(defgeneric retry-delay (policy condition attempt)
+  (:documentation "Seconds to wait before retrying after ATTEMPT (1-based)
+failed with CONDITION, or NIL when POLICY does not retry it.")
+  (:method ((policy null) condition attempt)
+    (declare (ignore condition attempt))
+    nil)
+  (:method ((policy retry-policy) condition attempt)
+    (let ((class (llm-retry-class condition)))
+      (when (and class
+                 (member class (retry-policy-classes policy))
+                 (< attempt (retry-policy-max-attempts policy)))
+        (let ((after (and (typep condition 'llm-http-error)
+                          (llm-http-error-retry-after condition)))
+              (cap (retry-policy-max-delay policy)))
+          (min cap
+               (if (realp after)
+                   (max 0 after)
+                   (* (retry-policy-base-delay policy)
+                      (expt 2 (1- attempt))
+                      ;; Overloaded servers recover slower than a blip.
+                      (if (eq class :overloaded) 2 1)))))))))
+
+(defun call-with-retry-policy (thunk &key (policy *retry-policy*) (sleep #'sleep))
+  "Call THUNK; when it signals an LLM-ERROR that POLICY retries, unwind, call
+SLEEP with the delay and call THUNK again. Other conditions pass through.
+Also establishes a RETRY restart (no wait) for outer handlers."
+  (let ((attempt 1))
+    (loop
+      (let ((delay nil))
+        (restart-case
+            (let ((retry (find-restart 'retry)))
+              (return-from call-with-retry-policy
+                (handler-bind ((llm-error
+                                 (lambda (c)
+                                   (let ((d (retry-delay policy c attempt)))
+                                     (when d
+                                       (setf delay d)
+                                       (invoke-restart retry))))))
+                  (funcall thunk))))
+          (retry ()
+            :report "Retry the LLM operation"
+            nil))
+        (when (and delay (plusp delay))
+          (funcall sleep delay))
+        (incf attempt)))))
+
+(defmacro with-retry-policy ((&key (policy '*retry-policy*) (sleep '#'sleep)) &body body)
+  "Run BODY under CALL-WITH-RETRY-POLICY."
+  `(call-with-retry-policy (lambda () ,@body) :policy ,policy :sleep ,sleep))
 
 ;;; --- restart helpers -------------------------------------------------------
 
