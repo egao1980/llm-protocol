@@ -960,6 +960,14 @@ in backends (llama.cpp native; HTTP backends can calibrate from LLM-USAGE)."))
       0
       (count-tokens backend (princ-to-string thing))))
 
+(defgeneric compaction-part-p (part)
+  (:documentation "T when PART is a provider-side compaction summary (Anthropic
+`compaction` block). The provider ignores every turn before the turn holding
+it, so callers may drop those turns locally.")
+  (:method (part)
+    (declare (ignore part))
+    nil))
+
 (defun anchored-token-count (backend turns &key usage (anchor-count 0))
   "Tokens TURNS take, anchored on what the provider measured.
 USAGE is the LLM-USAGE of the response whose prompt plus reply are the first

@@ -210,6 +210,7 @@
            #:context-window
            #:fit-turns
            #:anchored-token-count
+           #:compaction-part-p
            #:token-fit-policy
            #:make-token-fit-policy
            #:token-fit-policy-p
