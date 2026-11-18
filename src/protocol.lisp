@@ -960,6 +960,21 @@ in backends (llama.cpp native; HTTP backends can calibrate from LLM-USAGE)."))
       0
       (count-tokens backend (princ-to-string thing))))
 
+(defun anchored-token-count (backend turns &key usage (anchor-count 0))
+  "Tokens TURNS take, anchored on what the provider measured.
+USAGE is the LLM-USAGE of the response whose prompt plus reply are the first
+ANCHOR-COUNT turns of TURNS. Those turns count as the measured prompt and
+output tokens; only the turns after them are estimated with COUNT-TOKENS.
+Without USAGE (or with no measured input) every turn is estimated."
+  (let ((turns (coerce-turns turns)))
+    (if (and usage
+             (plusp (llm-usage-prompt-tokens usage))
+             (<= 0 anchor-count (length turns)))
+        (+ (llm-usage-prompt-tokens usage)
+           (or (llm-usage-output-tokens usage) 0)
+           (count-tokens backend (nthcdr anchor-count turns)))
+        (count-tokens backend turns))))
+
 (defgeneric context-window (backend model)
   (:documentation "Token context window for MODEL on BACKEND, or NIL.
 Looks up LLM-MODEL-INFO via LIST-MODELS / *LLM-CATALOG*, then

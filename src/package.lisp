@@ -11,6 +11,20 @@
            #:llm-http-error-status
            #:llm-http-error-body
            #:llm-http-error-retryable-p
+           #:llm-http-error-retry-after
+           #:llm-context-overflow
+           #:context-overflow-text-p
+           #:llm-retry-class
+           #:retry-policy
+           #:make-retry-policy
+           #:retry-policy-max-attempts
+           #:retry-policy-base-delay
+           #:retry-policy-max-delay
+           #:retry-policy-classes
+           #:*retry-policy*
+           #:retry-delay
+           #:call-with-retry-policy
+           #:with-retry-policy
            #:http-status-retryable-p
            #:llm-output-error
            #:llm-output-error-response
@@ -112,6 +126,9 @@
            #:llm-usage-input-tokens
            #:llm-usage-output-tokens
            #:llm-usage-total-tokens
+           #:llm-usage-cache-read-tokens
+           #:llm-usage-cache-write-tokens
+           #:llm-usage-prompt-tokens
 
            #:llm-item
            #:llm-item-p
@@ -192,6 +209,7 @@
            #:count-tokens
            #:context-window
            #:fit-turns
+           #:anchored-token-count
            #:token-fit-policy
            #:make-token-fit-policy
            #:token-fit-policy-p

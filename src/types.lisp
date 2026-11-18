@@ -141,11 +141,29 @@
 (defclass llm-usage ()
   ((input-tokens :initarg :input-tokens :accessor llm-usage-input-tokens :initform nil)
    (output-tokens :initarg :output-tokens :accessor llm-usage-output-tokens :initform nil)
-   (total-tokens :initarg :total-tokens :accessor llm-usage-total-tokens :initform nil)))
+   (total-tokens :initarg :total-tokens :accessor llm-usage-total-tokens :initform nil)
+   (cache-read-tokens :initarg :cache-read-tokens
+                      :accessor llm-usage-cache-read-tokens :initform nil
+                      :documentation "Prompt tokens served from the provider's cache.")
+   (cache-write-tokens :initarg :cache-write-tokens
+                       :accessor llm-usage-cache-write-tokens :initform nil
+                       :documentation "Prompt tokens written to the provider's cache."))
+  (:documentation "Token counts a provider reported for one response.
+INPUT-TOKENS excludes cached prompt tokens when the provider reports them
+apart (Anthropic); LLM-USAGE-PROMPT-TOKENS adds them back."))
 
-(defun make-llm-usage (&key input-tokens output-tokens total-tokens)
+(defun make-llm-usage (&key input-tokens output-tokens total-tokens
+                         cache-read-tokens cache-write-tokens)
   (make-instance 'llm-usage :input-tokens input-tokens
-                 :output-tokens output-tokens :total-tokens total-tokens))
+                 :output-tokens output-tokens :total-tokens total-tokens
+                 :cache-read-tokens cache-read-tokens
+                 :cache-write-tokens cache-write-tokens))
+
+(defun llm-usage-prompt-tokens (usage)
+  "Whole prompt size USAGE measured: input plus cache read and write tokens."
+  (+ (or (llm-usage-input-tokens usage) 0)
+     (or (llm-usage-cache-read-tokens usage) 0)
+     (or (llm-usage-cache-write-tokens usage) 0)))
 
 (defun llm-usage-p (x)
   (typep x 'llm-usage))
