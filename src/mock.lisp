@@ -7,17 +7,21 @@
            :initform (list (make-llm-model-info :id "mock" :owned-by "llm-protocol")))
    (tool-calls :initarg :tool-calls :accessor mock-llm-tool-calls :initform nil)
    (default-model :initarg :default-model :accessor mock-llm-default-model
-                  :initform "mock")))
+                  :initform "mock")
+   (compactor :initarg :compactor :accessor mock-llm-compactor :initform nil
+              :documentation "(lambda (turns &key instructions)) → summary text
+or NIL. Non-NIL: the backend compacts natively (SERVER-COMPACT).")))
 
 (defun make-mock-llm-backend (&key (prefix "echo: ") handler models tool-calls
-                                (default-model "mock"))
+                                (default-model "mock") compactor)
   (make-instance 'mock-llm-backend
                  :prefix prefix :handler handler
                  :models (or models
                              (list (make-llm-model-info :id default-model
                                                         :owned-by "llm-protocol")))
                  :tool-calls tool-calls
-                 :default-model default-model))
+                 :default-model default-model
+                 :compactor compactor))
 
 (defun use-mock-llm-backend (&rest args &key &allow-other-keys)
   (setf *llm-backend* (apply #'make-mock-llm-backend args)))
@@ -104,3 +108,40 @@
 
 (defmethod list-models ((backend mock-llm-backend) &key)
   (copy-list (mock-llm-models backend)))
+
+;;; --- provider compaction (tests) ---------------------------------------------
+
+(defclass mock-compaction-part (llm-part)
+  ((text :initarg :text :accessor mock-compaction-part-text :initform ""))
+  (:documentation "The summary block of a mock backend with a :COMPACTOR."))
+
+(defmethod compaction-part-p ((part mock-compaction-part)) t)
+
+(defmethod compaction-part-text ((part mock-compaction-part))
+  (mock-compaction-part-text part))
+
+(defmethod part-state ((part mock-compaction-part))
+  (list :type :mock-compaction :text (mock-compaction-part-text part)))
+
+(defmethod state-part ((type (eql :mock-compaction)) state)
+  (make-instance 'mock-compaction-part :text (or (getf state :text) "")))
+
+(defmethod backend-supports-p ((backend mock-llm-backend) (feature (eql :compaction)))
+  (and (mock-llm-compactor backend) t))
+
+(defmethod server-compact ((backend mock-llm-backend) turns
+                           &key model settings tools instructions)
+  (declare (ignore model settings tools))
+  (if (null (mock-llm-compactor backend))
+      (call-next-method)
+      (let* ((turns (coerce-turns turns))
+             (summary (funcall (mock-llm-compactor backend) turns
+                               :instructions instructions)))
+        (if summary
+            (values (append (remove :system turns :key #'llm-turn-role :test-not #'eq)
+                            (list (make-llm-turn
+                                   :role :assistant
+                                   :parts (list (make-instance 'mock-compaction-part
+                                                               :text summary)))))
+                    t nil)
+            (values turns nil nil)))))

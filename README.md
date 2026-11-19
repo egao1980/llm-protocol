@@ -111,7 +111,7 @@ Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-t
   (stack-llm:generate b "hi"))
 ```
 
-**Tokens anchored on usage.** `llm-usage` carries `cache-read-tokens` / `cache-write-tokens`; `llm-usage-prompt-tokens` is the whole measured prompt. `compaction-part-p` marks a provider-side compaction summary (Anthropic `compaction` block); turns before the turn holding it can be dropped locally. `(anchored-token-count backend turns :usage u :anchor-count n)` counts the first N turns (the prompt U measured plus its reply) as measured and estimates only the turns after them — far closer than the chars/4 heuristic over the whole history.
+**Tokens anchored on usage.** `llm-usage` carries `cache-read-tokens` / `cache-write-tokens`; `llm-usage-prompt-tokens` is the whole measured prompt. `compaction-part-p` marks a provider-side compaction summary (Anthropic `compaction` block) and `compaction-part-text` reads it. `(anchored-token-count backend turns :usage u :anchor-count n)` counts the first N turns (the prompt U measured plus its reply) as measured and estimates only the turns after them — far closer than the chars/4 heuristic over the whole history.
 
 **Router** (`llm-protocol/router`). `llm-router-backend` implements the full GF surface by delegating through a `routing-policy`. Policies are CLOS — wrap to compose (`budget-policy` around `fallback-chain-policy`). `fallback-chain-policy` advances on `llm-error` subtypes and retryable `llm-http-error` (429 / 5xx / 408 / 409) — try the next backend, do not add a second same-backend retry loop. `budget-policy` accounts `llm-usage` per scope string against an `llm-budget` (token + cost ceilings). Over ceiling → `llm-budget-exceeded` with restarts `continue-anyway`, `use-cheaper-model`, `abort`. `least-latency-policy` picks the lowest EWMA.
 
@@ -134,6 +134,10 @@ Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-t
 (stack-llm:generate (stack-llm:make-mock-llm-backend) "hi")
 (stack-telemetry:recorded-spans stack-telemetry:*telemetry-backend*)
 ```
+
+**Provider compaction.** `(server-compact backend turns :instructions s :tools ts)` → `(values new-turns compacted-p response)`: the system turns, then the provider's summary part (Anthropic: compaction on demand). Probe `(backend-supports-p b :compaction)`; client lookup is the `:llm-compaction` capability (`make-llm-catalogue`). No summary → the turns back and NIL. A router compacts on its first native candidate. `generate` / `stream-generate` on a backend without native compaction get `portable-turns`: a summary that opens the conversation becomes a `:system` turn (`+portable-summary-prefix+`); a threshold summary, whose turns are still there, is dropped.
+
+**Part state.** `(part-state part)` → a storable plist (`:type` first, no hash tables); `part-from-state` reads it back, `turn-state` / `state-turn` for turns. Thinking signatures and backend parts (methods on `part-state` / `state-part`) survive, so journals replay exactly; an unknown `:type` reads back as NIL. `make-mock-llm-backend :compactor (lambda (turns &key instructions))` compacts natively in tests.
 
 ## License
 

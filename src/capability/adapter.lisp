@@ -63,6 +63,9 @@ Query with CAPABILITY-SUPPORTED-P / GET-CAPABILITY / LIST-CAPABILITIES."
     (when (backend-supports-p backend :embeddings)
       (capability-protocol:register-capability
        cat (make-llm-embeddings-adapter :backend backend)))
+    (when (backend-supports-p backend :compaction)
+      (capability-protocol:register-capability
+       cat (make-llm-compaction-adapter :backend backend)))
     (dolist (pair +llm-support-capabilities+)
       (when (backend-supports-p backend (car pair))
         (capability-protocol:register-capability
@@ -76,3 +79,16 @@ Query with CAPABILITY-SUPPORTED-P / GET-CAPABILITY / LIST-CAPABILITIES."
       (capability-protocol:register-capability
        bb (capability-protocol:get-capability cat (getf row :name))))
     cat))
+
+(defclass llm-compaction-adapter (capability-protocol:llm-compaction-capability)
+  ((backend :initarg :backend :accessor llm-compaction-backend :initform nil))
+  (:documentation "Implements :llm-compaction COMPACT via SERVER-COMPACT."))
+
+(defun make-llm-compaction-adapter (&key backend)
+  (make-instance 'llm-compaction-adapter :backend backend))
+
+(defmethod capability-protocol:compact ((cap llm-compaction-adapter) turns
+                                        &key model settings tools instructions)
+  (server-compact (or (llm-compaction-backend cap) *llm-backend*) turns
+                  :model model :settings (coerce-settings settings)
+                  :tools tools :instructions instructions))

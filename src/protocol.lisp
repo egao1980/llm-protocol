@@ -9,6 +9,8 @@
 (defvar *llm-backend* nil
   "Current backend. Bind or call USE-MOCK-LLM-BACKEND / a backend's USE-* .")
 
+(declaim (special *llm-catalog*)) ; defvar in catalog.lisp, read here (CONTEXT-WINDOW)
+
 (defun %ensure-backend (&optional (backend *llm-backend*))
   (or backend
       (restart-case
@@ -753,19 +755,19 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
 
 (defmethod generate :around ((backend llm-backend) turns &rest args
                              &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend turns args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend turns) args))
 
 (defmethod stream-generate :around ((backend llm-backend) turns &rest args
                                     &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend turns args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend turns) args))
 
 (defmethod respond :around ((backend llm-backend) items &rest args
                             &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend items args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend items) args))
 
 (defmethod stream-respond :around ((backend llm-backend) items &rest args
                                    &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend items args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend items) args))
 
 (defmethod generate ((backend null) turns &rest args &key &allow-other-keys)
   (apply #'generate (%ensure-backend) turns args))
@@ -959,14 +961,6 @@ in backends (llama.cpp native; HTTP backends can calibrate from LLM-USAGE)."))
   (if (null thing)
       0
       (count-tokens backend (princ-to-string thing))))
-
-(defgeneric compaction-part-p (part)
-  (:documentation "T when PART is a provider-side compaction summary (Anthropic
-`compaction` block). The provider ignores every turn before the turn holding
-it, so callers may drop those turns locally.")
-  (:method (part)
-    (declare (ignore part))
-    nil))
 
 (defun anchored-token-count (backend turns &key usage (anchor-count 0))
   "Tokens TURNS take, anchored on what the provider measured.

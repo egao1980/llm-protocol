@@ -211,6 +211,15 @@
            #:fit-turns
            #:anchored-token-count
            #:compaction-part-p
+           #:compaction-part-text
+           #:server-compact
+           #:portable-turns
+           #:+portable-summary-prefix+
+           #:part-state
+           #:state-part
+           #:part-from-state
+           #:turn-state
+           #:state-turn
            #:token-fit-policy
            #:make-token-fit-policy
            #:token-fit-policy-p
@@ -219,6 +228,7 @@
 
            #:mock-llm-backend
            #:make-mock-llm-backend
+           #:mock-compaction-part
            #:use-mock-llm-backend
            #:mock-llm-prefix
            #:mock-llm-handler
@@ -231,6 +241,8 @@
            #:llm-embeddings-adapter
            #:llm-embeddings-backend
            #:make-llm-embeddings-adapter
+           #:llm-compaction-adapter
+           #:make-llm-compaction-adapter
            #:make-llm-catalogue
            #:register-llm-backend
 

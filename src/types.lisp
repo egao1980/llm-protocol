@@ -8,7 +8,7 @@
   '(member :system :user :assistant :tool))
 
 (deftype llm-finish-reason ()
-  '(member :stop :length :tool-use :content-filter))
+  '(member :stop :length :tool-use :content-filter :compaction))
 
 (defclass llm-part () ()
   (:documentation "One content block. Subclass, do not hang extra meaning on TEXT."))

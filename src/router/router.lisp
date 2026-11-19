@@ -350,6 +350,16 @@ Cost uses LLM-MODEL-INFO INPUT-PRICE / OUTPUT-PRICE as USD per 1M tokens."))
   (some (lambda (b) (backend-supports-p b feature))
         (%router-candidates backend)))
 
+(defmethod server-compact ((backend llm-router-backend) turns &rest args
+                           &key &allow-other-keys)
+  "Compact on the first candidate that compacts natively. Requests the router
+later sends to a candidate without compaction get PORTABLE-TURNS."
+  (let ((b (find-if (lambda (b) (backend-supports-p b :compaction))
+                    (%router-candidates backend))))
+    (if b
+        (apply #'server-compact b turns args)
+        (call-next-method))))
+
 (defmethod generate ((backend llm-router-backend) turns &key model settings tools
                      tool-choice output)
   (%router-dispatch

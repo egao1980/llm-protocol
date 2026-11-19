@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.4.0"
+  :version "0.5.0"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
@@ -15,16 +15,17 @@
                (:file "conditions")
                (:file "types")
                (:file "protocol")
+               (:file "parts")
                (:file "catalog")
                (:file "mock"))
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
 (defsystem "llm-protocol/capability"
-  :version "0.2.0"
+  :version "0.3.0"
   :description "capability-protocol :llm-generation / :llm-embeddings adapters over llm-protocol"
   :author "egao1980"
   :license "MIT"
-  :depends-on ("llm-protocol" "capability-protocol")
+  :depends-on ((:version "llm-protocol" "0.5.0") (:version "capability-protocol" "0.3.0"))
   :serial t
   :pathname "src/capability"
   :components ((:file "adapter"))
@@ -43,7 +44,7 @@
   :in-order-to ((test-op (test-op "llm-protocol/tests"))))
 
 (defsystem "llm-protocol/router"
-  :version "0.3.0"
+  :version "0.4.0"
   :description "CLOS routing policies (fallback / budget / latency) over llm-protocol"
   :author "egao1980"
   :license "MIT"
@@ -81,7 +82,8 @@
                (:file "restarts-test")
                (:file "tokens-test")
                (:file "router-test")
-               (:file "telemetry-test"))
+               (:file "telemetry-test")
+               (:file "parts-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))
