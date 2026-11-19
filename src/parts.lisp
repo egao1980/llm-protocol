@@ -150,9 +150,11 @@ they are."
                 do (setf seen-conversation t)))))
 
 (defun %portable-payload (backend turns)
-  "TURNS as BACKEND can take them: PORTABLE-TURNS unless it compacts natively."
+  "TURNS as BACKEND can take them: PORTABLE-TURNS unless it compacts natively.
+Only a list of LLM-TURNs is rewritten (RESPOND items stay as they are)."
   (if (and (listp turns)
-           (some (lambda (x) (and (llm-turn-p x) (%compaction-turn-p x))) turns)
+           (every #'llm-turn-p turns)
+           (some #'%compaction-turn-p turns)
            (not (backend-supports-p backend :compaction)))
       (portable-turns turns)
       turns))

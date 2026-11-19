@@ -763,11 +763,11 @@ sequence. Default method is ITEMS->TURNS then GENERATE. → LLM-RESPONSE (ITEMS 
 
 (defmethod respond :around ((backend llm-backend) items &rest args
                             &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend items args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend items) args))
 
 (defmethod stream-respond :around ((backend llm-backend) items &rest args
                                    &key &allow-other-keys)
-  (%call-with-output #'call-next-method backend items args))
+  (%call-with-output #'call-next-method backend (%portable-payload backend items) args))
 
 (defmethod generate ((backend null) turns &rest args &key &allow-other-keys)
   (apply #'generate (%ensure-backend) turns args))
