@@ -155,3 +155,44 @@
                   :sleep (lambda (s) (declare (ignore s))))
                  'llm-protocol:llm-http-error))
     (ok (= 2 n))))
+
+(defun %partial-response ()
+  (llm-protocol:make-llm-response
+   :parts (list (llm-protocol:make-llm-text-part :text "half"))
+   :finish-reason :incomplete))
+
+(deftest incomplete-response-condition
+  (let ((partial (%partial-response)))
+    (handler-case (llm-protocol:signal-incomplete-response partial :message "cut")
+      (llm-protocol:llm-incomplete-response (c)
+        (ok (typep c 'llm-protocol:llm-http-error))
+        (ok (eq partial (llm-protocol:llm-incomplete-response-partial c)))
+        (ok (llm-protocol:llm-http-error-retryable-p c))
+        (ok (eq :transient (llm-protocol:llm-retry-class c)))
+        (ok (search "cut" (princ-to-string c)))))
+    (ok (typep :incomplete 'llm-protocol::llm-finish-reason))))
+
+(deftest incomplete-response-use-partial-restart
+  (let* ((partial (%partial-response))
+         (r (handler-bind ((llm-protocol:llm-incomplete-response
+                             #'llm-protocol:invoke-use-partial-response))
+              (llm-protocol:signal-incomplete-response partial))))
+    (ok (eq partial r))
+    (ok (eq :incomplete (llm-protocol:llm-response-finish-reason r)))
+    (ok (equal "half" (llm-protocol:llm-response-text r))))
+  (ok (eq :other
+          (handler-bind ((llm-protocol:llm-incomplete-response
+                           (lambda (c) (llm-protocol:invoke-use-value :other c))))
+            (llm-protocol:signal-incomplete-response (%partial-response))))))
+
+(deftest incomplete-response-retried-by-policy
+  (let ((n 0))
+    (ok (eq :done
+            (llm-protocol:call-with-retry-policy
+             (lambda ()
+               (incf n)
+               (if (< n 2)
+                   (llm-protocol:signal-incomplete-response (%partial-response))
+                   :done))
+             :sleep (lambda (s) (declare (ignore s))))))
+    (ok (= 2 n))))

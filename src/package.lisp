@@ -13,6 +13,11 @@
            #:llm-http-error-retryable-p
            #:llm-http-error-retry-after
            #:llm-context-overflow
+           #:llm-incomplete-response
+           #:llm-incomplete-response-partial
+           #:signal-incomplete-response
+           #:use-partial-response
+           #:invoke-use-partial-response
            #:context-overflow-text-p
            #:llm-retry-class
            #:retry-policy
