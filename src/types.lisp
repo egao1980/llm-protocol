@@ -8,7 +8,10 @@
   '(member :system :user :assistant :tool))
 
 (deftype llm-finish-reason ()
-  '(member :stop :length :tool-use :content-filter :compaction))
+  '(member :stop :length :tool-use :content-filter :compaction
+            ;; The stream closed before the provider sent a terminal signal;
+            ;; set on the partial response of LLM-INCOMPLETE-RESPONSE.
+            :incomplete))
 
 (defclass llm-part () ()
   (:documentation "One content block. Subclass, do not hang extra meaning on TEXT."))

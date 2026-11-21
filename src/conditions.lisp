@@ -92,6 +92,42 @@ retried as is: compact the turns (conversation-protocol COMPACT-TURNS) first.")
                      (llm-http-error-status c)
                      (llm-error-message c)))))
 
+;;; --- incomplete (truncated) streamed response ----------------------------
+
+(define-condition llm-incomplete-response (llm-http-error)
+  ((partial :initarg :partial :reader llm-incomplete-response-partial
+            :initform nil
+            :documentation "The LLM-RESPONSE assembled from what arrived before
+the stream closed (text, thinking, tool calls; finish reason :INCOMPLETE)."))
+  (:default-initargs :retryable-p t)
+  (:documentation "A streamed response ended without a terminal signal (no
+finish reason / end sentinel / completed event): the connection closed or the
+server aborted mid-answer. LLM-RETRY-CLASS :TRANSIENT (no status, retryable),
+so a RETRY-POLICY retries it. Signalled
+by SIGNAL-INCOMPLETE-RESPONSE, which offers USE-PARTIAL-RESPONSE.")
+  (:report (lambda (c s)
+             (format s "llm stream ended without a terminal signal~@[: ~a~]"
+                     (llm-error-message c)))))
+
+(defun signal-incomplete-response (partial &key message)
+  "Signal LLM-INCOMPLETE-RESPONSE carrying PARTIAL (an LLM-RESPONSE whose
+finish reason is :INCOMPLETE). Restarts:
+  USE-PARTIAL-RESPONSE — return PARTIAL as the result;
+  USE-VALUE (value)    — return VALUE instead.
+An outer RETRY (WITH-LLM-RESTARTS, CALL-WITH-RETRY-POLICY) re-runs the call."
+  (restart-case
+      (error 'llm-incomplete-response :partial partial :message message)
+    (use-partial-response ()
+      :report "Use the partial response (finish reason :INCOMPLETE)"
+      partial)
+    (use-value (value)
+      :report "Use a supplied response instead"
+      :interactive (lambda ()
+                     (format *query-io* "Value to use: ")
+                     (force-output *query-io*)
+                     (list (read *query-io*)))
+      value)))
+
 (defparameter +context-overflow-markers+
   '("prompt is too long" "context_length_exceeded" "maximum context length"
     "context length" "context window" "too many tokens" "input is too long"
@@ -236,6 +272,12 @@ Also establishes a RETRY restart (no wait) for outer handlers."
 
 (defun invoke-ignore-output (&optional condition)
   (let ((r (find-restart 'ignore-output condition)))
+    (when r (invoke-restart r))))
+
+(defun invoke-use-partial-response (&optional condition)
+  "Invoke USE-PARTIAL-RESPONSE when active (decline otherwise), e.g. from a
+HANDLER-BIND on LLM-INCOMPLETE-RESPONSE."
+  (let ((r (find-restart 'use-partial-response condition)))
     (when r (invoke-restart r))))
 
 (defun invoke-continue-anyway (&optional condition)

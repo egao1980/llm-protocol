@@ -106,6 +106,8 @@ Content: `llm-response-content` / `llm-response-parts` (blocks), `llm-response-t
 
 **Retry by failure class.** `llm-retry-class` sorts a failure: `:rate-limit` (429), `:overloaded` (503 / 529), `:transient` (408 / 409 / other 5xx), `:context-overflow`, or NIL (auth, bad request). A `retry-policy` (default `*retry-policy*`: 5 attempts, 2 s doubling, 30 s cap) says which classes to retry; `retry-delay` honours the provider's `Retry-After` (`llm-http-error-retry-after`) and waits twice as long on `:overloaded`. `call-with-retry-policy` / `with-retry-policy` run a call under it (injectable `:sleep`). `llm-context-overflow` is never retried as is — backends signal it when `context-overflow-text-p` matches the error body, and the caller compacts first.
 
+**Truncated streams.** A streamed response that closes without a terminal signal (no finish reason, end sentinel or completed event) is not a success: backends call `signal-incomplete-response`, which signals `llm-incomplete-response` (an `llm-http-error`, retryable, class `:transient`) carrying the partial response (`llm-incomplete-response-partial`, finish reason `:incomplete`). Restarts: `use-partial-response` (helper `invoke-use-partial-response`) returns the partial response; `use-value` substitutes one; an outer `retry` re-runs the call.
+
 ```lisp
 (stack-llm:with-retry-policy (:policy (stack-llm:make-retry-policy :max-attempts 3))
   (stack-llm:generate b "hi"))
