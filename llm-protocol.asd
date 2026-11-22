@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.6.0"
+  :version "0.7.0"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
@@ -13,6 +13,7 @@
   :pathname "src"
   :components ((:file "package")
                (:file "conditions")
+               (:file "errors")
                (:file "types")
                (:file "protocol")
                (:file "parts")
@@ -80,6 +81,7 @@
                (:file "capability-test")
                (:file "schema-test")
                (:file "restarts-test")
+               (:file "errors-test")
                (:file "tokens-test")
                (:file "router-test")
                (:file "telemetry-test")

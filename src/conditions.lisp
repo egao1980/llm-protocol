@@ -38,6 +38,11 @@
 
 (define-condition llm-http-error (llm-error)
   ((status :initarg :status :reader llm-http-error-status :initform nil)
+   ;; 0.7.0: where the request went, for messages that name the provider,
+   ;; the base URL and the model. Never the API key.
+   (provider :initarg :provider :reader llm-error-provider :initform nil)
+   (url :initarg :url :reader llm-error-url :initform nil)
+   (model :initarg :model :reader llm-error-model :initform nil)
    (body :initarg :body :reader llm-http-error-body :initform nil)
    (retry-after :initarg :retry-after :reader llm-http-error-retry-after
                 :initform nil
@@ -167,16 +172,26 @@ Backends use it to signal LLM-CONTEXT-OVERFLOW instead of LLM-HTTP-ERROR."
               :documentation "Upper bound on one wait, Retry-After included.")
    (classes :initarg :classes :accessor retry-policy-classes
             :initform '(:rate-limit :overloaded :transient)
-            :documentation "LLM-RETRY-CLASS values this policy retries."))
+            :documentation "LLM-RETRY-CLASS values this policy retries.")
+   (jitter :initarg :jitter :accessor retry-policy-jitter :initform 0
+           :documentation "0.7.0: fraction in [0, 1]. A backoff delay D becomes
+D x (1 - JITTER x R), R uniform in [0, 1) from *RETRY-RANDOM-STATE*. A
+Retry-After delay is never jittered. 0 (the default) keeps 0.6 delays."))
   (:documentation "Which failures to retry and how long to wait between tries."))
 
 (defun make-retry-policy (&key (max-attempts 5) (base-delay 2) (max-delay 30)
-                            (classes '(:rate-limit :overloaded :transient)))
+                            (classes '(:rate-limit :overloaded :transient))
+                            (jitter 0))
   (check-type max-attempts (integer 1 *))
   (check-type base-delay (real 0 *))
   (check-type max-delay (real 0 *))
+  (check-type jitter (real 0 1))
   (make-instance 'retry-policy :max-attempts max-attempts :base-delay base-delay
-                               :max-delay max-delay :classes classes))
+                               :max-delay max-delay :classes classes
+                               :jitter jitter))
+
+(defvar *retry-random-state* (make-random-state t)
+  "0.7.0: the random state RETRY-DELAY draws jitter from. Tests bind a fixed one.")
 
 (defvar *retry-policy* (make-retry-policy)
   "Default policy for CALL-WITH-RETRY-POLICY and the ai-agent generate step.")
@@ -195,13 +210,16 @@ failed with CONDITION, or NIL when POLICY does not retry it.")
         (let ((after (and (typep condition 'llm-http-error)
                           (llm-http-error-retry-after condition)))
               (cap (retry-policy-max-delay policy)))
-          (min cap
-               (if (realp after)
-                   (max 0 after)
-                   (* (retry-policy-base-delay policy)
-                      (expt 2 (1- attempt))
-                      ;; Overloaded servers recover slower than a blip.
-                      (if (eq class :overloaded) 2 1)))))))))
+          (if (realp after)
+              (min cap (max 0 after))
+              (let ((backoff (min cap
+                                  (* (retry-policy-base-delay policy)
+                                     (expt 2 (1- attempt))
+                                     ;; Overloaded servers recover slower than a blip.
+                                     (if (eq class :overloaded) 2 1)))))
+                (if (plusp (retry-policy-jitter policy))
+                    (jittered-delay backoff (retry-policy-jitter policy))
+                    backoff))))))))
 
 (defun call-with-retry-policy (thunk &key (policy *retry-policy*) (sleep #'sleep))
   "Call THUNK; when it signals an LLM-ERROR that POLICY retries, unwind, call
