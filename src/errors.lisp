@@ -74,9 +74,6 @@
 ;;;   (RANDOM 1.0d0 *RETRY-RANDOM-STATE*). JITTER 0 → DELAY unchanged.
 ;;;   RETRY-DELAY calls it for backoff delays only (never for Retry-After).
 
-(defun %h3f-pending (name)
-  (error "llm-protocol 0.7.0: ~a is not implemented yet (H3f contract)" name))
-
 (define-condition llm-rate-limited (llm-http-error) ()
   (:default-initargs :status 429 :retryable-p t)
   (:report (lambda (c s)
@@ -123,37 +120,195 @@
     ("HTTP-CONNECTION-ERROR" . :connect))
   "http-protocol condition type names → transport kinds, tried in order.")
 
+(defun %text-mentions-p (text &rest needles)
+  "T when TEXT is a string that contains one of NEEDLES, ignoring case."
+  (and (stringp text)
+       (some (lambda (needle) (search needle text :test #'char-equal)) needles)
+       t))
+
 (defun llm-http-error-class (status &key body message)
-  (declare (ignore status body message))
-  (%h3f-pending 'llm-http-error-class))
+  "The LLM-HTTP-ERROR class name for an HTTP error answer (rules: this file's
+header). STATUS is split into disjoint types, so no clause depends on the
+order of the others, and a cell refines its class with one text test at most.
+Any other object (NIL, \"429\", 429.0) falls into the last cell. Never signals."
+  (typecase status
+    ((member 400 413)
+     (if (or (context-overflow-text-p message) (context-overflow-text-p body))
+         'llm-context-overflow
+         'llm-http-error))
+    ((eql 429) 'llm-rate-limited)
+    ((member 401 403) 'llm-auth-error)
+    ((eql 404) 'llm-not-found)
+    ((integer 500 599)
+     (if (or (member status '(503 529))
+             (%text-mentions-p message "overloaded")
+             (%text-mentions-p body "overloaded"))
+         'llm-overloaded
+         'llm-http-error))
+    (t 'llm-http-error)))
 
 (defun make-llm-http-error (status &key body message retry-after provider url model)
-  (declare (ignore status body message retry-after provider url model))
-  (%h3f-pending 'make-llm-http-error))
+  "The condition object for an HTTP error answer, made with MAKE-CONDITION and
+not signalled. Its class is LLM-HTTP-ERROR-CLASS. RETRYABLE-P is not passed:
+each subclass's :DEFAULT-INITARGS carry it (rate-limited and overloaded T;
+auth, not-found and context overflow NIL), and a plain LLM-HTTP-ERROR leaves
+the slot unbound, so LLM-HTTP-ERROR-RETRYABLE-P derives it from STATUS.
+MESSAGE defaults to \"HTTP <status>\" for an integer STATUS. RETRY-AFTER is
+read with PARSE-RETRY-AFTER. Never signals."
+  (make-condition (llm-http-error-class status :body body :message message)
+                  :status status
+                  :body body
+                  :message (or message
+                               (and (integerp status) (format nil "HTTP ~d" status)))
+                  :retry-after (parse-retry-after retry-after)
+                  :provider provider
+                  :url url
+                  :model model))
+
+(defun %ascii-integer (string start end)
+  "The integer that STRING spells from START to END in ASCII digits (one or
+more), else NIL. DIGIT-CHAR-P and PARSE-INTEGER also accept other scripts'
+digits, so every character is checked against #\\0..#\\9 first."
+  (and (< start end)
+       (loop for i from start below end
+             always (char<= #\0 (char string i) #\9))
+       (parse-integer string :start start :end end)))
+
+(defun %parse-delta-seconds (string)
+  "Delta-seconds, 1*DIGIT [\".\" 1*DIGIT], as seconds, else NIL (a sign, an
+exponent, \".5\" and \"5.\" are not). An integer stays an integer (\"7\" is 7).
+A fraction is a single-float, which the rate-limited report prints as \"1.5\";
+from 10^6 s up it is the ceiling integer, so FLOAT cannot overflow on a long
+digit string."
+  (let ((dot (position #\. string))
+        (end (length string)))
+    (if (null dot)
+        (%ascii-integer string 0 end)
+        (let ((whole (%ascii-integer string 0 dot))
+              (fraction (%ascii-integer string (1+ dot) end)))
+          (when (and whole fraction)
+            (let ((seconds (+ whole (/ fraction (expt 10 (- end dot 1))))))
+              (if (< whole 1000000)
+                  (float seconds 1.0)
+                  (ceiling seconds))))))))
+
+(defun %name-index (names string start)
+  "The index in NAMES of the three-letter name at START in STRING, or NIL."
+  (position-if (lambda (name) (string= name string :start2 start :end2 (+ start 3)))
+               names))
+
+(defun %days-in-month (month year)
+  "Days in MONTH (1-12) of YEAR, with Gregorian leap years."
+  (case month
+    (2 (if (and (zerop (mod year 4))
+                (or (plusp (mod year 100)) (zerop (mod year 400))))
+           29
+           28))
+    ((4 6 9 11) 30)
+    (t 31)))
+
+(defun %parse-imf-fixdate (string)
+  "The universal time of an IMF-fixdate (RFC 9110 5.6.7: \"Sun, 06 Nov 1994
+08:49:37 GMT\", 29 characters, case-sensitive), else NIL. Every field is
+checked before ENCODE-UNIVERSAL-TIME, which signals on some bad fields (second
+60, day 0, a year before 1900), normalises others (Feb 31 is Mar 3) and reads a
+year below 100 as one near today. A leap second (60) is 59 plus one."
+  (when (and (= (length string) 29)
+             (%name-index '("Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun") string 0)
+             (string= ", " string :start2 3 :end2 5)
+             (char= #\Space (char string 7) (char string 11) (char string 16))
+             (char= #\: (char string 19) (char string 22))
+             (string= " GMT" string :start2 25))
+    (let ((day (%ascii-integer string 5 7))
+          (month (%name-index '("Jan" "Feb" "Mar" "Apr" "May" "Jun"
+                                "Jul" "Aug" "Sep" "Oct" "Nov" "Dec")
+                              string 8))
+          (year (%ascii-integer string 12 16))
+          (hour (%ascii-integer string 17 19))
+          (minute (%ascii-integer string 20 22))
+          (second (%ascii-integer string 23 25)))
+      (when (and day month year hour minute second
+                 (<= 1900 year)
+                 (<= 1 day (%days-in-month (1+ month) year))
+                 (<= hour 23) (<= minute 59) (<= second 60))
+        (+ (encode-universal-time (min second 59) minute hour day (1+ month) year 0)
+           (- second (min second 59)))))))
 
 (defun parse-retry-after (value &key (now (get-universal-time)))
-  (declare (ignore value now))
-  (%h3f-pending 'parse-retry-after))
+  "Seconds to wait (a non-negative real) from a Retry-After VALUE, or NIL
+(rules: this file's header). Never signals: every input is checked before the
+call that could signal, and nothing is caught."
+  (typecase value
+    (real (if (minusp value) 0 value))
+    (string
+     (let ((trimmed (string-trim '(#\Space #\Tab #\Return #\Newline) value)))
+       (or (%parse-delta-seconds trimmed)
+           (let ((at (%parse-imf-fixdate trimmed)))
+             (and at (realp now) (max 0 (- at now)))))))
+    (t nil)))
+
+(defun %http-protocol-class (name)
+  "The class that NAME (a string) names in the HTTP-PROTOCOL package, or NIL
+when the package, the symbol or the class is missing. TYPEP signals on a
+symbol that names no type, so only a class object ever reaches it."
+  (let ((package (find-package "HTTP-PROTOCOL")))
+    (and package
+         (stringp name)
+         (let ((symbol (find-symbol name package)))
+           (and symbol (find-class symbol nil))))))
+
+(defun %condition-text (condition)
+  "CONDITION's report on one line: no pretty-printer breaks, no print limits."
+  (let ((*print-pretty* nil) (*print-length* nil) (*print-level* nil))
+    (princ-to-string condition)))
 
 (defun transport-error-kind-for (condition &key (types +http-protocol-transport-types+))
-  (declare (ignore condition types))
-  (%h3f-pending 'transport-error-kind-for))
+  "The +TRANSPORT-ERROR-KINDS+ kind for CONDITION, or NIL (rules: this file's
+header). TYPES rows (name . kind) are tried in order, and a name is only
+looked up in the HTTP-PROTOCOL package, so llm-protocol needs no http-protocol
+dependency. A :CONNECT match whose text mentions reset, closed, incomplete or
+EOF is :RESET. With no row matching, text that contains \"incomplete HTTP
+response\" is :RESET. The report is rendered only when a rule reads it."
+  (let ((row (find-if (lambda (row)
+                        (let ((class (and (consp row) (%http-protocol-class (car row)))))
+                          (and class (typep condition class))))
+                      types)))
+    (cond ((null row)
+           (and (%text-mentions-p (%condition-text condition) "incomplete HTTP response")
+                :reset))
+          ((and (eq (cdr row) :connect)
+                (%text-mentions-p (%condition-text condition)
+                                  "reset" "closed" "incomplete" "eof"))
+           :reset)
+          (t (cdr row)))))
 
 (defun jittered-delay (delay jitter)
-  (declare (ignore delay jitter))
-  (%h3f-pending 'jittered-delay))
+  "DELAY x (1 - JITTER x R), R from (RANDOM 1.0d0 *RETRY-RANDOM-STATE*), so the
+result is in (DELAY x (1 - JITTER), DELAY]. JITTER 0 returns DELAY itself and
+draws nothing. RETRY-DELAY calls it for backoff delays only."
+  (check-type delay (real 0 *))
+  (check-type jitter (real 0 1))
+  (if (zerop jitter)
+      delay
+      (* delay (- 1 (* jitter (random 1.0d0 *retry-random-state*))))))
 
 (defmethod llm-retry-class ((condition llm-rate-limited))
-  (%h3f-pending 'llm-retry-class))
+  "Retryable unless an explicit :RETRYABLE-P NIL says otherwise (the 0.5
+status method's rule), so RETRY-POLICY and AUTO-RETRY agree."
+  (and (llm-http-error-retryable-p condition) :rate-limit))
 
 (defmethod llm-retry-class ((condition llm-overloaded))
-  (%h3f-pending 'llm-retry-class))
+  "Retryable unless an explicit :RETRYABLE-P NIL says otherwise."
+  (and (llm-http-error-retryable-p condition) :overloaded))
 
 (defmethod llm-retry-class ((condition llm-auth-error))
-  (%h3f-pending 'llm-retry-class))
+  "Never retried, whatever RETRYABLE-P says."
+  nil)
 
 (defmethod llm-retry-class ((condition llm-not-found))
-  (%h3f-pending 'llm-retry-class))
+  "Never retried, whatever RETRYABLE-P says."
+  nil)
 
 (defmethod llm-retry-class ((condition llm-transport-error))
-  (%h3f-pending 'llm-retry-class))
+  ":TRANSIENT, except NIL for kind :CANCELED (the caller gave up)."
+  (if (eq (llm-transport-error-kind condition) :canceled) nil :transient))
