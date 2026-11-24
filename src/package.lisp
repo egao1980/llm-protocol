@@ -13,6 +13,28 @@
            #:llm-http-error-retryable-p
            #:llm-http-error-retry-after
            #:llm-context-overflow
+           ;; 0.7.0 error taxonomy (src/errors.lisp)
+           #:llm-error-provider
+           #:llm-error-url
+           #:llm-error-model
+           #:llm-rate-limited
+           #:llm-overloaded
+           #:llm-auth-error
+           #:llm-not-found
+           #:llm-transport-error
+           #:llm-transport-error-cause
+           #:llm-transport-error-kind
+           #:llm-transport-error-provider
+           #:llm-transport-error-url
+           #:+transport-error-kinds+
+           #:+http-protocol-transport-types+
+           #:llm-http-error-class
+           #:make-llm-http-error
+           #:parse-retry-after
+           #:transport-error-kind-for
+           #:jittered-delay
+           #:retry-policy-jitter
+           #:*retry-random-state*
            #:llm-incomplete-response
            #:llm-incomplete-response-partial
            #:signal-incomplete-response
