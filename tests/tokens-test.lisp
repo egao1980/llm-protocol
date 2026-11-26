@@ -11,6 +11,61 @@
       (ok (= 3 (llm-protocol:count-tokens b turns))))
     (ok (= 1 (llm-protocol:count-tokens b (llm-protocol:user-turn "wxyz"))))))
 
+(deftest count-tokens-turn-tool-result-part
+  ;; egao1980/llm-protocol#17: a tool result costs what the same text costs.
+  (let* ((b (make-instance 'llm-protocol:llm-backend))
+         (content (make-string 2800 :initial-element #\a))
+         (tool (llm-protocol:make-llm-turn
+                :role :tool
+                :parts (list (llm-protocol:make-llm-tool-result-part
+                              :id "x" :content content)))))
+    (ok (= 700 (llm-protocol:count-tokens b (llm-protocol:user-turn content))))
+    (ok (= 700 (llm-protocol:count-tokens b tool)))
+    (ok (= 700 (llm-protocol:count-tokens b (list tool))))
+    (ok (= 700 (llm-protocol:count-tokens b (llm-protocol:tool-turn "x" content))))))
+
+(deftest count-tokens-turn-tool-call-part
+  (let* ((b (make-instance 'llm-protocol:llm-backend))
+         ;; "read_file" = 9 chars -> 3, {"path":"a.lisp"} = 17 chars -> 5.
+         (call (llm-protocol:make-llm-tool-call-part
+                :id "c1" :name "read_file" :arguments "{\"path\":\"a.lisp\"}"))
+         (turn (llm-protocol:assistant-turn nil :tool-calls (list call))))
+    (ok (= 8 (llm-protocol:count-tokens b call)))
+    (ok (= 8 (llm-protocol:count-tokens b turn)))))
+
+(deftest count-tokens-turn-mixed-parts
+  (let* ((b (make-instance 'llm-protocol:llm-backend))
+         (call (llm-protocol:make-llm-tool-call-part
+                :id "c1" :name "read_file" :arguments "{\"path\":\"a.lisp\"}"))
+         (result (llm-protocol:make-llm-tool-result-part
+                  :id "c1" :content "abcdefghijkl"))
+         (assistant (llm-protocol:assistant-turn "abcd" :tool-calls (list call)))
+         (user (llm-protocol:user-turn "abcdefgh" result))
+         (turns (list assistant user)))
+    ;; text 1 + call 8
+    (ok (= 9 (llm-protocol:count-tokens b assistant)))
+    ;; text 2 + result 3
+    (ok (= 5 (llm-protocol:count-tokens b user)))
+    (ok (= 14 (llm-protocol:count-tokens b turns)))
+    (ok (= 14 (llm-protocol:anchored-token-count b turns)))
+    ;; the anchored tail is estimated with the same per-turn count
+    (ok (= 20 (llm-protocol:anchored-token-count
+               b turns :usage (llm-protocol:make-llm-usage :input-tokens 10
+                                                           :output-tokens 5)
+               :anchor-count 1)))))
+
+(deftest count-tokens-turn-text-only-unchanged
+  (let ((b (make-instance 'llm-protocol:llm-backend)))
+    (ok (= 1 (llm-protocol:count-tokens b (llm-protocol:user-turn "wxyz"))))
+    (ok (= 2 (llm-protocol:count-tokens b (llm-protocol:assistant-turn "abcdefgh"))))
+    ;; several text parts still count as their concatenation: 10 chars -> 3
+    (ok (= 3 (llm-protocol:count-tokens
+              b (llm-protocol:make-llm-turn
+                 :role :user
+                 :parts (list (llm-protocol:make-llm-text-part :text "abcde")
+                              (llm-protocol:make-llm-text-part :text "fghij"))))))
+    (ok (zerop (llm-protocol:count-tokens b (llm-protocol:make-llm-turn :role :user))))))
+
 (deftest fit-turns-keeps-system-drops-oldest
   (let* ((b (make-instance 'llm-protocol:llm-backend))
          (sys (llm-protocol:system-turn "sys"))
