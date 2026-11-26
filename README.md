@@ -36,7 +36,7 @@ Brief: [`llm.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabiliti
 
 Role on the **turn**; type on the **part**. Responses grain is `llm-item` (`llm-message-item`, `llm-function-call-item`, …). `turns->items` / `items->turns` convert. Tools are descriptors, not executors.
 
-**Tokens / context** (0.3.0, core, still dep-free). `count-tokens` default is `ceiling(length / 4)` for strings; turns sum `turn-text`; parts use text; sequences sum. Exact tokenizers belong in backends. `context-window` reads `llm-model-info` (or a provider-wide default). `fit-turns` drops the oldest non-system turns until the budget fits and keeps every `:system` turn. Policy is an integer token budget or `token-fit-policy` (`:reserve` subtracted from the window).
+**Tokens / context** (0.3.0, core, still dep-free). `count-tokens` default is `ceiling(length / 4)` for strings; turns count `turn-text` plus every non-text part (tool calls count name + arguments, tool results their content, thinking its text; 0.7.1); parts use text; sequences sum. Exact tokenizers belong in backends. `context-window` reads `llm-model-info` (or a provider-wide default). `fit-turns` drops the oldest non-system turns until the budget fits and keeps every `:system` turn. Policy is an integer token budget or `token-fit-policy` (`:reserve` subtracted from the window).
 
 ```lisp
 (stack-llm:count-tokens b "abcd") ; ⇒ 1

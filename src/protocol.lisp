@@ -940,7 +940,12 @@ in backends (llama.cpp native; HTTP backends can calibrate from LLM-USAGE)."))
         0)))
 
 (defmethod count-tokens (backend (thing llm-turn))
-  (count-tokens backend (turn-text thing)))
+  "Text parts count as one string (TURN-TEXT), as before; every other part
+(tool calls, tool results, thinking, ...) adds its own COUNT-TOKENS."
+  (+ (count-tokens backend (turn-text thing))
+     (reduce #'+ (remove-if #'llm-text-part-p (llm-turn-parts thing))
+             :key (lambda (p) (count-tokens backend p))
+             :initial-value 0)))
 
 (defmethod count-tokens (backend (thing llm-message-item))
   (reduce #'+ (llm-message-item-parts thing)
