@@ -1,5 +1,5 @@
 (defsystem "llm-protocol"
-  :version "0.7.1"
+  :version "0.8.0"
   :description "CLOS LLM protocol (turns + typed parts) for cl-stack; not blackboard core"
   :author "egao1980"
   :license "MIT"
@@ -85,7 +85,8 @@
                (:file "tokens-test")
                (:file "router-test")
                (:file "telemetry-test")
-               (:file "parts-test"))
+               (:file "parts-test")
+               (:file "release-080-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))

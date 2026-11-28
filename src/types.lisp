@@ -39,6 +39,20 @@
 (defun llm-image-part-p (x)
   (typep x 'llm-image-part))
 
+(defclass llm-audio-part (llm-part)
+  ((url :initarg :url :accessor llm-audio-part-url :initform nil)
+   (media-type :initarg :media-type :accessor llm-audio-part-media-type :initform nil
+               :documentation "audio/wav, audio/mpeg, ...")
+   (data :initarg :data :accessor llm-audio-part-data :initform nil
+         :documentation "Base64 audio, as MCP and OpenAI input_audio carry it."))
+  (:documentation "0.8.0: audio input (an MCP audio block, OpenAI input_audio)."))
+
+(defun make-llm-audio-part (&key url media-type data)
+  (make-instance 'llm-audio-part :url url :media-type media-type :data data))
+
+(defun llm-audio-part-p (x)
+  (typep x 'llm-audio-part))
+
 (defclass llm-tool-call-part (llm-part)
   ((id :initarg :id :accessor llm-tool-call-part-id :initform nil)
    (name :initarg :name :accessor llm-tool-call-part-name)

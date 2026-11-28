@@ -54,6 +54,15 @@
     (declare (ignore type state))
     nil))
 
+(defmethod part-state ((part llm-audio-part))
+  (list :type :audio :url (llm-audio-part-url part)
+        :media-type (llm-audio-part-media-type part)
+        :data (llm-audio-part-data part)))
+
+(defmethod state-part ((type (eql :audio)) state)
+  (make-llm-audio-part :url (getf state :url) :media-type (getf state :media-type)
+                       :data (getf state :data)))
+
 (defun part-from-state (state)
   "STATE-PART on STATE's :TYPE. → LLM-PART or NIL."
   (state-part (getf state :type) state))

@@ -330,6 +330,17 @@
            #:llm-router-backend-p
            #:llm-router-policy
            #:llm-router-candidates
-           #:llm-router-scope))
+           #:llm-router-scope
+           #:retry
+           #:retry-policy-overloaded-factor
+           #:backend-model-info
+           #:clear-model-info-cache
+           #:*model-info-cache-ttl*
+           #:llm-audio-part
+           #:make-llm-audio-part
+           #:llm-audio-part-p
+           #:llm-audio-part-url
+           #:llm-audio-part-media-type
+           #:llm-audio-part-data))
 
 (in-package #:llm-protocol)
