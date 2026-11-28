@@ -173,6 +173,11 @@ Backends use it to signal LLM-CONTEXT-OVERFLOW instead of LLM-HTTP-ERROR."
    (classes :initarg :classes :accessor retry-policy-classes
             :initform '(:rate-limit :overloaded :transient)
             :documentation "LLM-RETRY-CLASS values this policy retries.")
+   (overloaded-factor :initarg :overloaded-factor :accessor retry-policy-overloaded-factor
+                      :initform 2
+                      :documentation "0.8.0: the backoff of an :OVERLOADED failure (503,
+529) is multiplied by this: overloaded servers recover slower than a blip. 1
+gives plain exponential backoff for every class.")
    (jitter :initarg :jitter :accessor retry-policy-jitter :initform 0
            :documentation "0.7.0: fraction in [0, 1]. A backoff delay D becomes
 D x (1 - JITTER x R), R uniform in [0, 1) from *RETRY-RANDOM-STATE*. A
@@ -180,14 +185,16 @@ Retry-After delay is never jittered. 0 (the default) keeps 0.6 delays."))
   (:documentation "Which failures to retry and how long to wait between tries."))
 
 (defun make-retry-policy (&key (max-attempts 5) (base-delay 2) (max-delay 30)
-                            (classes '(:rate-limit :overloaded :transient))
-                            (jitter 0))
+                               (classes '(:rate-limit :overloaded :transient))
+                               (overloaded-factor 2) (jitter 0))
   (check-type max-attempts (integer 1 *))
   (check-type base-delay (real 0 *))
   (check-type max-delay (real 0 *))
+  (check-type overloaded-factor (real 0 *))
   (check-type jitter (real 0 1))
   (make-instance 'retry-policy :max-attempts max-attempts :base-delay base-delay
                                :max-delay max-delay :classes classes
+                               :overloaded-factor overloaded-factor
                                :jitter jitter))
 
 (defvar *retry-random-state* (make-random-state t)
@@ -216,7 +223,9 @@ failed with CONDITION, or NIL when POLICY does not retry it.")
                                   (* (retry-policy-base-delay policy)
                                      (expt 2 (1- attempt))
                                      ;; Overloaded servers recover slower than a blip.
-                                     (if (eq class :overloaded) 2 1)))))
+                                     (if (eq class :overloaded)
+                                         (retry-policy-overloaded-factor policy)
+                                         1)))))
                 (if (plusp (retry-policy-jitter policy))
                     (jittered-delay backoff (retry-policy-jitter policy))
                     backoff))))))))

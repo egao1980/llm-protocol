@@ -114,6 +114,14 @@ capability-protocol: CAPABILITY-SUPPORTED-P on a catalogue (see llm-protocol/cap
                               :arguments (or (getf tc :arguments) "{}")))
     (t (error 'llm-error :message (format nil "not a tool-call part: ~s" tc)))))
 
+(defun %audio-format-media-type (format)
+  "OpenAI input_audio FORMAT (\"wav\", \"mp3\") → a media type."
+  (and format
+       (let ((format (string-downcase (string format))))
+         (if (string= format "mp3")
+             "audio/mpeg"
+             (concatenate 'string "audio/" format)))))
+
 (defun %coerce-part (part)
   (cond
     ((llm-part-p part) part)
@@ -127,8 +135,21 @@ capability-protocol: CAPABILITY-SUPPORTED-P on a catalogue (see llm-protocol/cap
            :url (or (gethash "url" part)
                     (let ((iu (gethash "image_url" part)))
                       (if (hash-table-p iu) (gethash "url" iu) iu)))
-           :media-type (or (gethash "media_type" part) (gethash "mediaType" part))
+           ;; mimeType: MCP content blocks.
+           :media-type (or (gethash "media_type" part) (gethash "mediaType" part)
+                           (gethash "mimeType" part))
            :data (gethash "data" part)))
+         ((:audio :input-audio)
+          (let ((ia (gethash "input_audio" part)))
+            (make-llm-audio-part
+             :url (gethash "url" part)
+             :media-type (or (gethash "media_type" part) (gethash "mediaType" part)
+                             (gethash "mimeType" part)
+                             (%audio-format-media-type
+                              (or (gethash "format" part)
+                                  (and (hash-table-p ia) (gethash "format" ia)))))
+             :data (or (gethash "data" part)
+                       (and (hash-table-p ia) (gethash "data" ia))))))
          ((:tool-call :function-call :tool-use)
           (%coerce-tool-call-part part))
          ((:tool-result :function-call-output)
@@ -889,23 +910,69 @@ RESERVE tokens are subtracted from the window/budget (completion headroom)."))
     (find backend (ignore-errors (list-providers catalog))
           :key #'llm-provider-backend :test #'eq)))
 
+(defvar *model-info-cache-ttl* 300
+  "0.8.0: seconds the default BACKEND-MODEL-INFO keeps a backend's LIST-MODELS
+result. NIL keeps it until CLEAR-MODEL-INFO-CACHE; 0 caches nothing.")
+
+(defvar *model-info-cache* (make-hash-table :test 'eq)
+  "Backend → (universal-time . models): the LIST-MODELS results the default
+BACKEND-MODEL-INFO keeps. A failed listing is never kept.")
+
+(defun clear-model-info-cache (&optional backend)
+  "Forget the LIST-MODELS result kept for BACKEND, or for every backend."
+  (if backend
+      (remhash backend *model-info-cache*)
+      (clrhash *model-info-cache*))
+  nil)
+
+(defun %cached-model-listing (backend)
+  "BACKEND's LIST-MODELS, kept per *MODEL-INFO-CACHE-TTL*. A backend whose
+listing fails (LLM-ERROR: none implemented, a request error) lists nothing,
+and the failure is not kept."
+  (let ((entry (gethash backend *model-info-cache*))
+        (ttl *model-info-cache-ttl*)
+        (now (get-universal-time)))
+    (if (and entry (or (null ttl) (< (- now (car entry)) ttl)))
+        (cdr entry)
+        (handler-case
+            (let ((models (list-models backend)))
+              (if (and ttl (<= ttl 0))
+                  (remhash backend *model-info-cache*)
+                  (setf (gethash backend *model-info-cache*) (cons now models)))
+              models)
+          (llm-error () nil)))))
+
+(defgeneric backend-model-info (backend id)
+  (:documentation "0.8.0: the LLM-MODEL-INFO BACKEND has for model ID, or NIL.
+The default looks ID up in BACKEND's LIST-MODELS, kept for
+*MODEL-INFO-CACHE-TTL* seconds (CLEAR-MODEL-INFO-CACHE). A backend that knows
+its models without a request (a static table, its own cache) specializes it.
+CONTEXT-WINDOW asks *LLM-CATALOG* first, then this.")
+  (:method ((backend t) id)
+    (and id
+         (find-if (lambda (m)
+                    (and (llm-model-info-p m)
+                         (equal (llm-model-info-id m) id)))
+                  (%cached-model-listing backend)))))
+
+(defun %catalog-model-info (backend id)
+  "The LLM-MODEL-INFO *LLM-CATALOG*'s provider for BACKEND lists for ID, or NIL."
+  (when (and id *llm-catalog*)
+    (let ((prov (%provider-for-backend *llm-catalog* backend)))
+      (when prov
+        (find-if (lambda (m)
+                   (and (llm-model-info-p m)
+                        (equal (llm-model-info-id m) id)))
+                 (llm-provider-models prov))))))
+
 (defun %lookup-model-info (backend model)
-  "→ LLM-MODEL-INFO or NIL. MODEL may be a string, id, or LLM-MODEL-INFO."
+  "→ LLM-MODEL-INFO or NIL. MODEL may be a string, id, or LLM-MODEL-INFO.
+The catalog's entry first (0.8.0), then BACKEND-MODEL-INFO."
   (when (llm-model-info-p model)
     (return-from %lookup-model-info model))
   (let ((id (%model-id (or model (ignore-errors (backend-model backend))))))
-    (or (when id
-          (find-if (lambda (m)
-                     (and (llm-model-info-p m)
-                          (equal (llm-model-info-id m) id)))
-                   (ignore-errors (list-models backend))))
-        (when (and id *llm-catalog*)
-          (let ((prov (%provider-for-backend *llm-catalog* backend)))
-            (when prov
-              (find-if (lambda (m)
-                         (and (llm-model-info-p m)
-                              (equal (llm-model-info-id m) id)))
-                       (llm-provider-models prov))))))))
+    (or (%catalog-model-info backend id)
+        (and id (backend-model-info backend id)))))
 
 (defgeneric count-tokens (backend thing)
   (:documentation "Estimate tokens for THING on BACKEND.
@@ -984,18 +1051,24 @@ Without USAGE (or with no measured input) every turn is estimated."
 
 (defgeneric context-window (backend model)
   (:documentation "Token context window for MODEL on BACKEND, or NIL.
-Looks up LLM-MODEL-INFO via LIST-MODELS / *LLM-CATALOG*, then
-LLM-PROVIDER-CONTEXT-WINDOW."))
+The first window of: MODEL itself (an LLM-MODEL-INFO), *LLM-CATALOG*'s entry
+for the model, BACKEND-MODEL-INFO (a cached LIST-MODELS by default), then
+LLM-PROVIDER-CONTEXT-WINDOW. An entry without a window never hides a later
+one (0.8.0)."))
 
 (defmethod context-window ((backend null) model)
   (context-window (%ensure-backend) model))
 
 (defmethod context-window ((backend llm-backend) model)
-  (let ((info (%lookup-model-info backend model)))
-    (or (and (llm-model-info-p info) (llm-model-info-context-window info))
-        (let ((prov (and *llm-catalog*
-                         (%provider-for-backend *llm-catalog* backend))))
-          (and prov (llm-provider-context-window prov))))))
+  (flet ((window (info)
+           (and (llm-model-info-p info) (llm-model-info-context-window info))))
+    (let ((id (%model-id (or model (ignore-errors (backend-model backend))))))
+      (or (window model)
+          (window (%catalog-model-info backend id))
+          (and id (window (backend-model-info backend id)))
+          (let ((prov (and *llm-catalog*
+                           (%provider-for-backend *llm-catalog* backend))))
+            (and prov (llm-provider-context-window prov)))))))
 
 (defun %token-budget (backend policy model)
   (let ((reserve 0)
